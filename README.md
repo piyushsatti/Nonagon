@@ -1,16 +1,17 @@
-<<<<<<< HEAD
-# nonagon
-=======
+# Big Brother
+- Designed and deployed an end-to-end community platform for D&D players—combining a modular Discord bot, a Flask web dashboard, and REST APIs to automate quest scheduling, and player analytics. 
+- Implemented quest lifecycle tracking, character XP/GP calculators, and real-time churn alerts; persisted data in MongoDB (player, character, quest, and engagement collections) and served analytics through FastAPI endpoints.
+- Containerised the bot & API with Docker and automated CI/CD via GitHub Actions, delivering 200 ms end-to-end latency for typical Discord commands. Achieve 80% pytest coverage
+
 # Tools Used
 - https://discordpy.readthedocs.io/en/stable/
-
 
 # Discord Bot Development Milestones
 
 ## Milestone 0 — Setup & Scaffolding (1–2 days)
-- [ ] Register bot in Discord Developer Portal  
-- [ ] Invite bot to test server with correct perms  
-- [ ] Choose stack: **Python + discord.py** or **Node.js + discord.js**  
+- [x] Register bot in Discord Developer Portal  
+- [x] Invite bot to test server with correct perms  
+- [x] Stack: **Python + discord.py**
 - [ ] Create base bot project (command prefix, cogs / modular folders)  
 - [ ] Connect to lightweight DB (SQLite / JSON)  
 > **Success:** `!ping` and `!help` respond; bot logs in without errors.
@@ -70,4 +71,3 @@
 > **Success:** Data visible outside Discord.
 
 ---
->>>>>>> f09af0a (git init)
