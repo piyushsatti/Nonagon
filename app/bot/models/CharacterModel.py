@@ -9,7 +9,7 @@ class Character:
   character_id: str
   name: str
   ddb_link: str
-  server_link: str
+  character_thread_link: str
   token_link: str
   art_link: str
   status: str

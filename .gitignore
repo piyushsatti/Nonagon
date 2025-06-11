@@ -185,3 +185,4 @@ cython_debug/
 
 
 trash/
+.DS_Store
