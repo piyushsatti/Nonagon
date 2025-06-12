@@ -8,7 +8,7 @@ import discord
 @dataclass
 class User:
 
-  _id: int
+  user_id: int
   
   # statistics
   joined_at: datetime
@@ -17,15 +17,23 @@ class User:
   # engagement telemetry
   messages_count_total: int = 0
   messages_count_by_category: Dict[int, int] = field(default_factory=dict)
+
+  # Reactions
   reactions_given: int = 0
   reactions_received: int = 0
-  count_draw_steel_mentioned: int = 0
 
   # Voice Call - hours
   voice_total_time_spent: int = 0
-  voice_time_spent_in_hangout: int = 0
-  voice_time_spent_in_game: int = 0
+  voice_time_by_channel: Dict[str, float] = field(default_factory=dict)
 
   # Event
   events_attended: int = 0
   events_organized: int = 0
+
+  # Fun
+  fun_count_banned: int = 0
+  fun_count_liked: int = 0
+  fun_count_disliked: int = 0
+  fun_count_kek: int = 0
+  fun_count_true: int = 0
+  fun_count_heart: int = 0
