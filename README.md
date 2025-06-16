@@ -71,3 +71,12 @@
 > **Success:** Data visible outside Discord.
 
 ---
+
+
+# Database
+We are using mongodb.
+
+Each user is a document,
+users are a collection
+
+users + players + referees + characters is a database which is per guild
