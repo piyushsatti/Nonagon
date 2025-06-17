@@ -8,12 +8,6 @@ from .models.UserModel import User
 from .database import db_client
 
 import logging
-logging.basicConfig(
-  filename='bot.log',
-  encoding='utf-8',
-  level=logging.INFO,
-  force=True               # ← removes existing handlers first
-)
 
 class Nonagon(commands.Bot):
   """Main bot class that initializes the Discord bot and loads cogs.
@@ -128,6 +122,8 @@ class Nonagon(commands.Bot):
     logging.info("Initial cache and DB created for %s - %d users", guild.name, len(users))
 
 if __name__ == "__main__":
+
+  logging.basicConfig(level=logging.INFO)
 
   intents = discord.Intents.default()
   intents.message_content = True
