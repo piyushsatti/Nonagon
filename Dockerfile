@@ -1,5 +1,5 @@
 FROM python:3.11-slim
-WORKDIR /nonagon
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+WORKDIR /root/nonagon
 COPY . .
+RUN pip install -r requirements.txt
+CMD [ "python", "-m", "app.bot.main" ]
