@@ -1,49 +1,13 @@
-version: "3.9"
-
 services:
-  # --- Discord bot (Python) -----------------
+
   bot:
     build: .
-    env_file: .env            # contains BOT_TOKEN and MONGO_URI
-    depends_on:
-      - mongo                 # start after DB
-    restart: unless-stopped
-
-  # --- MongoDB ------------------------------
-  mongo:
-    image: mongo              # official LTS image
-    ports:
-      - "27017:27017"
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: changeme
+    image: nonagon-bot
+    container_name: nonagon_bot
+    env_file: .env
+    command: python -m app.bot.main
     volumes:
-      - mongo-data:/data/db    # host ↔ container persistence
-    restart: unless-stopped
-
-  # --- Optional GUI -------------------------
-  mongo-express:
-    image: mongo-express
-    ports:
-      - "8081:8081"
-    environment:
-      ME_CONFIG_MONGODB_ADMINUSERNAME: root
-      ME_CONFIG_MONGODB_ADMINPASSWORD: changeme
-      ME_CONFIG_MONGODB_SERVER: mongo
-    depends_on:
-      - mongo
-    restart: unless-stopped
-
-
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile.fastapi
-    environment:
-      - MONGO_URI=mongodb://mongo:27017
+      - ./bot.log:/nonagon/bot.log
     ports:
       - "8000:8000"
-    depends_on: [mongo]
-
-volumes:
-  mongo-data:
+    restart: unless-stopped

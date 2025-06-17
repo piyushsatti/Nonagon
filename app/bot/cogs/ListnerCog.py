@@ -21,7 +21,7 @@ class ListnerCog(commands.Cog):
 
     self.bot.guild_data[member.guild.id]["users"][member.id] = User.from_member(member)
     await self.bot.dirty_data.put((member.guild.id, member.id))
-    logging.info(f"User: {member.id} joined the guild. Joined At: {member.joined_at} Total Users: {len(self.bot.guild_data[member.guild.id]["users"])})")
+    logging.info(f"User: {member.id} joined the guild. Joined At: {member.joined_at} Total Users: {len(self.bot.guild_data[member.guild.id]['users'])}")
 
   @commands.Cog.listener("on_message")
   async def on_message(self, message: Message):
