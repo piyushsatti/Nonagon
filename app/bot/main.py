@@ -1,15 +1,13 @@
-from dataclasses import asdict, is_dataclass
-import discord
-import logging, asyncio
-from mongomock import Database
-
-from .models.UserModel import User
+import discord, logging, asyncio
+from dataclasses import asdict
+from pathlib import Path
+from discord.ext import commands
 
 from .config import BOT_TOKEN
+from .models.UserModel import User
 from .database import db_client
-from .cogs import ListnerCog, GuildCog
 
-class Nonagon(discord.ext.commands.Bot):
+class Nonagon(commands.Bot):
   """Main bot class that initializes the Discord bot and loads cogs.
   This class is responsible for setting up the bot, registering events,
   and loading the necessary cogs for functionality.
@@ -22,19 +20,26 @@ class Nonagon(discord.ext.commands.Bot):
 
   # Called before the bot logins to discord
   async def setup_hook(self):
+
+    # Load every .py file under the bot/cogs directory as an extension
+    cogs_path = Path(__file__).parent / "cogs"
+    for file in cogs_path.glob("*.py"):
+      if file.name.startswith("_"):
+        continue                      # skip __init__.py and private modules
+      ext = f"app.bot.cogs.{file.stem}"   # e.g. bot.cogs.my_cog
+      try:
+        await self.load_extension(ext)
+      except Exception as e:
+        traceback = logging.Formatter().formatException(e.__traceback__)
+        logging.error(f"Error loading extension {ext}:\n{traceback}")
+      else:
+        logging.info(f"Loaded extension {ext}")
+
     try:
-      # Flush dirty_guild data
       self.loop.create_task(self._auto_persist_loop())
-    except asyncio.CancelledError:
-      logging.error("Auto persist loop was cancelled. This is expected during shutdown.")
-    try:
-      # Loads Cogs
-      await self.add_cog(GuildCog.GuildCog(self))
-      await self.add_cog(ListnerCog.ListnerCog(self))
-      logging.info("Loaded all cogs.")
     except Exception as e:
-      logging.error(f"Failed to load cogs: {e}")
-      raise
+      logging.error(f"Auto persist loop encountered an error: {e}")
+
     # Call the parent setup_hook to ensure all cogs are loaded
     await super().setup_hook()
 

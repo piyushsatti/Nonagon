@@ -1,21 +1,20 @@
 import logging
 from datetime import datetime
-from discord import Member, Message, RawReactionActionEvent, VoiceState
+from discord import Member, Message, RawReactionActionEvent, VoiceState, Guild
 from discord.ext import commands
 
+from ..database import db_client
 from ..models.UserModel import User
 
 class ListnerCog(commands.Cog):
-  """Handles telemetry when user joins guild.
-  """
 
   def __init__(self, bot: commands.Bot):
     self.bot = bot
     self._voice_starts: dict[int, datetime] = {}
     self._voice_channels: dict[int, str] = {}
 
-  @commands.Cog.listener()
-  async def on_member_join(self, member: Member):
+  @commands.Cog.listener("on_member_join")
+  async def _on_member_join(self, member: Member):
 
     if member.bot:
       return
@@ -24,7 +23,7 @@ class ListnerCog(commands.Cog):
     await self.bot.dirty_data.put((member.guild.id, member.id))
     logging.info(f"User: {member.id} joined the guild. Joined At: {member.joined_at} Total Users: {len(self.bot.guild_data[member.guild.id]["users"])})")
 
-  @commands.Cog.listener()
+  @commands.Cog.listener("on_message")
   async def on_message(self, message: Message):
 
     if message.author.bot:
@@ -51,8 +50,8 @@ class ListnerCog(commands.Cog):
     await self.bot.dirty_data.put((guild_id, author_id))
     logging.info(f"User: {user.user_id} sent a message. Channel: {message.channel.id} Category: {category_id} Total Messages: {user.messages_count_total} Messages by Category: {user.messages_count_by_category} Last Active At: {user.last_active_at}")
 
-  @commands.Cog.listener()
-  async def on_raw_reaction_add(self, reaction: RawReactionActionEvent):
+  @commands.Cog.listener("on_raw_reaction_add")
+  async def _on_raw_reaction_add(self, reaction: RawReactionActionEvent):
 
     if reaction.member.bot:
       return
@@ -96,8 +95,8 @@ class ListnerCog(commands.Cog):
     await self.bot.dirty_data.put((guild_id, message_author_id))
     logging.info(f"User: {reacting_user.user_id} reacted with {reaction.emoji.name} to message by {author_user.user_id} in channel {reaction.channel_id} Total Reactions Given: {reacting_user.reactions_given} Total Reactions Received: {author_user.reactions_received} Fun Reactions: {author_user.fun_count_banned}, {author_user.fun_count_liked}, {author_user.fun_count_disliked}, {author_user.fun_count_kek}, {author_user.fun_count_true}, {author_user.fun_count_heart}")
 
-  @commands.Cog.listener()
-  async def on_voice_state_update(
+  @commands.Cog.listener("on_voice_state_update")
+  async def _on_voice_state_update(
     self, 
     member: Member, 
     before: VoiceState, 
@@ -168,3 +167,47 @@ class ListnerCog(commands.Cog):
 
     await self.bot.dirty_data.put((member.guild.id, member.id))
     logging.info(f"User: {user.user_id} changed voice state. Before: {before.channel} After: {after.channel} Total Voice Time: {user.voice_total_time_spent} hours Time by Channel: {user.voice_time_by_channel}")
+
+  @commands.Cog.listener("on_guild_join")
+  async def _on_guild_join(self, guild: Guild):
+    """When joining a guild:
+    - Scrape and create Users from Guild.Members
+    - Create database for new guild
+    - Save all data to cache"""
+
+    logging.info(f"Joined new guild: {guild.name} (ID: {guild.id})")
+
+    users = {}
+    for member in guild.members:
+      
+      if member.bot:
+        continue
+      
+      logging.info(f"Creating user cache for {member.name} (ID: {member.id})")
+      users[member.id] = User.from_member(member)
+
+      await self.bot.dirty_data.put((guild.id, member.id))
+
+
+    db_name = f"{guild.id}"
+    g_db = db_client.get_database(db_name)
+
+    self.bot.guild_data[guild.id] = {
+      "db": g_db,
+      "users": users
+    }
+    logging.info(f"Cache created for guild {guild.name}.")
+
+  @commands.Cog.listener("on_guild_remove")
+  async def _on_guild_remove(self, guild: Guild):
+    logging.info(f"Left guild: {guild.name} (ID: {guild.id}) \nRemoving cache...")
+    self.bot.guild_data.pop(guild.id, None)
+    logging.info(f"Removed caches for guild {guild.name}.")
+
+  @commands.Cog.listener("on_error")
+  async def _on_error(self, event_method, /, *args, **kwargs):
+    logging.error(f"Error in {event_method}: {args} {kwargs}")
+    await super().on_error(event_method, *args, **kwargs)
+
+async def setup(bot: commands.Bot):
+  await bot.add_cog(ListnerCog(bot))

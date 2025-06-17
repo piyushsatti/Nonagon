@@ -1,14 +1,14 @@
 import logging
 
-from ..database import db_client
-from ..main import Nonagon
+from ..app.bot.database import db_client
+from ..app.bot.main import Nonagon
 
 from discord.ext import commands
 from discord import Guild
 
-from ..models.UserModel import User
+from ..app.bot.models.UserModel import User
 
-class GuildCog(commands.Cog):
+class GuildListenerCog(commands.Cog):
 
   def __init__(self, bot: commands.Bot):
     self.bot: Nonagon = bot
@@ -53,3 +53,6 @@ class GuildCog(commands.Cog):
   async def on_error(self, event_method, /, *args, **kwargs):
     logging.error(f"Error in {event_method}: {args} {kwargs}")
     await super().on_error(event_method, *args, **kwargs)
+
+def setup(bot: commands.Bot):
+  bot.add_cog(GuildListenerCog(bot))
