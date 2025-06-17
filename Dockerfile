@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11
 WORKDIR /root/nonagon
 COPY . .
 RUN pip install -r requirements.txt
