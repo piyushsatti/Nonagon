@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  mongo:
+    image: mongo:6.0
+    container_name: nonagon-mongo
+    ports:
+      - "27017:27017"         # expose for local tools (optional)
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: example
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      args:
+        SERVICE: api           # or "bot" if you want the bot
+    environment:
+      # IMPORTANT: use the service name "mongo" as hostname inside the compose network
+      MONGODB_URI: mongodb://root:example@mongo:30000
+      DB_NAME: nonagon
+      # add your other envs here (BOT_TOKEN, etc.)
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "8000:8000"            # only needed for API service

@@ -4,7 +4,9 @@
 - Containerised the bot & API with Docker and automated CI/CD via GitHub Actions, delivering 200 ms end-to-end latency for typical Discord commands. Achieve 80% pytest coverage
 
 # Tools Used
-- https://discordpy.readthedocs.io/en/stable/
+- [Discord.py](https://discordpy.readthedocs.io/en/stable/)
+- [Redis](https://redis.io/)
+- [MongoDB](https://www.mongodb.com/docs/mongodb-shell/)
 
 # Discord Bot Development Milestones
 
@@ -80,3 +82,12 @@ Each user is a document,
 users are a collection
 
 users + players + referees + characters is a database which is per guild
+
+
+
+
+# To-Do
+- [ ] Redo documentation
+- [ ] Make soft architecture for porject
+  - [ ] Redis vs local cache
+- [ ] 

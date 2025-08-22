@@ -1,0 +1,24 @@
+[project]
+name = "nonagon"
+version = "0.1.0"
+description = "Quest automation & tracking Discord bot"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "discord.py>=2.5",
+  "pymongo>=4.0",
+  "python-dotenv>=1.0",
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+  "python-jose[cryptography]>=3.3",
+  "passlib[bcrypt]>=1.7",
+  "motor>=3.4"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-mongo>=3.0",
+  "black>=24.1",
+  "ruff>=0.0.291"
+]
