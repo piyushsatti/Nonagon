@@ -2,17 +2,21 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional
+from enum import Enum, auto
+
+class Role(Enum):
+  ACTIVE = auto()
+  INACTIVE = auto()
 
 @dataclass
 class Character:
-  """Represents a player character."""
   character_id: str
   name: str
   ddb_link: str
   character_thread_link: str
   token_link: str
   art_link: str
-  status: str
+  status: Role
   
   # Telemetry
   created_at: datetime
@@ -21,7 +25,7 @@ class Character:
   summaries_written: int
 
   # Optional fields
-  tags: Optional[List[str]] = field(default_factory=list) # tags for filtering
+  tags: Optional[List[str]] = field(default_factory=list) # custom tags
   description: Optional[str] = None  # character description
-  resources: Optional[List[str]] = field(default_factory=list)  # e.g., "healing potion", "gold coins"
-  notes: Optional[str] = None  # additional notes about the character
+  resources: Optional[List[str]] = field(default_factory=list)  # custome tracker
+  notes: Optional[str] = None
