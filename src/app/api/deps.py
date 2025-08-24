@@ -1,8 +1,7 @@
-# src/app/api/deps.py
 from app.infra.db import get_db
-from app.infra.users_repo import MongoUsersRepo
-from app.infra.quests_repo import MongoQuestsRepo
-from app.infra.summaries_repo import MongoSummariesRepo
+from app.infra.repo.users_repo import MongoUsersRepo
+from app.infra.repo.quests_repo import MongoQuestsRepo
+from app.infra.repo.summaries_repo import MongoSummariesRepo
 
 def get_users_repo():
     return MongoUsersRepo(get_db())
