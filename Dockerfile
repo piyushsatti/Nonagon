@@ -36,7 +36,7 @@ ARG SERVICE=api
 ENV SERVICE=${SERVICE}
 
 CMD ["/bin/sh", "-c", "if [ \"$SERVICE\" = \"api\" ]; then \
-      uvicorn app.api.server:app --host 0.0.0.0 --port 8000; \
+      uvicorn app.api.main:app --host 0.0.0.0 --port 8000; \
     else \
       python -m app.bot.main; \
     fi"]
