@@ -14,7 +14,7 @@ This document outlines the Product Requirements Document (PRD) for the Nonagon D
 
 **Status**: Draft
 
-**Last Updated**: 17 Aug 2025
+**Last Updated**: 24 Aug 2025
 
 **Contributors**: Piyush Satti
 
@@ -71,6 +71,7 @@ There are two main problems:
 
   * As a Player, I want to sign up with any of my characters, so I can participate easily.
   * As a Player, I want to publish adventure summaries, so others can reference past quests.
+  * As a Player, I want my quest announcements to show up in a website.
 
 * **Referee**:
 
@@ -150,6 +151,15 @@ There are two main problems:
 - Subtask 3.1: Implement auto-linking logic across DB + Discord.
 - Subtask 3.2: Set up integration for posting summaries to relevant channels/outlets.
 - Subtask 3.3: Build admin command to audit summary-to-quest links.
+
+### Epic 4: Frontend for Quests
+
+**Story 1**: As a Player, I want to view current/old quests on a website.
+- Subtask 1.1: Define API schema for fetching quests and summaries.
+- Subtask 1.2: Set up basic frontend project structure.
+- Subtask 1.3: Implement integration with backend API.
+- Subtask 1.4: Host frontend on a vercel app.
+- Subtask 1.5: Integrate with `smokebombstudios.com`.
 
 ### Cross-Epic Tasks (Ops/Infra)
 **Task 1**: Setup project repo and CI/CD pipeline.
