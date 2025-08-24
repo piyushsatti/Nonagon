@@ -4,8 +4,7 @@ from datetime import datetime
 from enum import Enum, auto
 from typing import Optional
 
-from discord.member import Member
-
+from app.domain.models.EntityIDModel import UserID
 from app.domain.models.EntityIDModel import QuestID
 from app.domain.models.EntityIDModel import SummaryID
 from app.domain.models.user.PlayerModel import PlayerID
@@ -18,7 +17,7 @@ class SummaryKind(str, Enum):
 @dataclass
 class QuestSummary:
 
-  author_list: Member
+  author_list: UserID
   summary_id: SummaryID
   quest_id: QuestID
   kind: SummaryKind
