@@ -6,8 +6,8 @@ from typing import Dict, List, Optional, Any
 
 from discord import Member
 
-from app.domain.models.user.PlayerModel import PlayerProfile
-from app.domain.models.user.RefereeModel import RefereeProfile
+from app.domain.models.user.PlayerModel import Player
+from app.domain.models.user.RefereeModel import Referee
 
 from app.domain.models.EntityIDModel import UserID
 
@@ -38,8 +38,8 @@ class User:
   voice_total_time_spent: int = 0  # hours
 
   # Optional role profiles
-  player: Optional[PlayerProfile] = None
-  referee: Optional[RefereeProfile] = None
+  player: Optional[Player] = None
+  referee: Optional[Referee] = None
 
   # ---------- factories ----------
   @classmethod
@@ -68,7 +68,7 @@ class User:
   def enable_player(self) -> None:
     self.add_role(Role.PLAYER)
     if self.player is None:
-      self.player = PlayerProfile()
+      self.player = Player()
 
   def enable_referee(self) -> None:
     if Role.PLAYER not in self.roles:
@@ -76,7 +76,7 @@ class User:
 
     self.add_role(Role.REFEREE)
     if self.referee is None:
-      self.referee = RefereeProfile()
+      self.referee = Referee()
 
   def to_dict(self) -> Dict[str, Any]:
     return asdict(self)

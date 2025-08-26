@@ -1,9 +1,9 @@
 from __future__ import annotations
 from typing import Protocol, Iterable, Optional
 
-from app.domain.models.UserModel import User
-from app.domain.models.QuestModel import Quest, QuestStatus
-from app.domain.models.SummaryModel import QuestSummary
+from app.domain.models.user.UserModel import User
+from app.domain.models.quest.QuestModel import Quest, QuestStatus
+from app.domain.models.quest.SummaryModel import QuestSummary
 
 # --------- domain/application errors ----------
 class NotFoundError(RuntimeError): ...

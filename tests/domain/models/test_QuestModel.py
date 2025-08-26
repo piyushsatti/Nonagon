@@ -1,7 +1,7 @@
 # tests/domain/models/test_quest.py
 from datetime import datetime, timedelta
 
-from app.domain.models.QuestModel import (
+from app.domain.models.quest.QuestModel import (
     Quest,
     QuestStatus,
     SignupStatus,

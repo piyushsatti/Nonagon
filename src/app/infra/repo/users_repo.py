@@ -11,7 +11,7 @@ class MongoUsersRepo(UsersRepo):
     self.col: AsyncIOMotorCollection = db["users"]
 
   @classmethod
-  async def create(cls, db: AsyncIOMotorDatabase) -> "MongoUsersRepo":
+  async def create(cls, db: AsyncIOMotorDatabase) -> MongoUsersRepo:
     self = cls(db)
     await self.col.create_index("user_id", unique=True)
     return self

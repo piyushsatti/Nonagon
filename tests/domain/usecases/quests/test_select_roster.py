@@ -1,6 +1,6 @@
 import pytest
 from app.domain.models.UserModel import User
-from app.domain.models.QuestModel import Quest, QuestStatus, SignupStatus
+from app.domain.models.quest.QuestModel import Quest, QuestStatus, SignupStatus
 from app.domain.usecases.ports import ForbiddenError, InvalidOperationError
 from app.domain.usecases.quests.select_roster import select_roster, SelectRosterInput
 

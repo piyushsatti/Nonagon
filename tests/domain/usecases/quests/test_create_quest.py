@@ -1,6 +1,6 @@
 import pytest
 from app.domain.models.UserModel import User, Role
-from app.domain.models.QuestModel import Quest
+from app.domain.models.quest.QuestModel import Quest
 from app.domain.usecases.ports import ForbiddenError
 from app.domain.usecases.quests.create_quest import create_quest, CreateQuestInput
 

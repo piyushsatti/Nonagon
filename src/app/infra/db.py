@@ -1,4 +1,3 @@
-# src/app/infra/db.py
 from __future__ import annotations
 from typing import Optional
 
@@ -11,8 +10,8 @@ def get_client() -> AsyncIOMotorClient:
   global _client
   
   if _client is None:
-    _client = AsyncIOMotorClient(MONGODB_URI, appname="nonagon")
-  
+    _client = AsyncIOMotorClient(MONGODB_URI, appname="nonagon", serverSelectionTimeoutMS=5000)
+
   return _client
 
 def get_db() -> AsyncIOMotorDatabase:

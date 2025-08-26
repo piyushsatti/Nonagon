@@ -1,7 +1,7 @@
 # tests/domain/models/test_summary.py
 from datetime import datetime, timedelta
 
-from app.domain.models.SummaryModel import QuestSummary, SummaryKind
+from app.domain.models.quest.SummaryModel import QuestSummary, SummaryKind
 
 
 # ─────────────────────────────────────────────────────────────

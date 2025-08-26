@@ -4,11 +4,7 @@ from datetime import datetime
 from enum import Enum, auto
 from typing import Optional
 
-from app.domain.models.EntityIDModel import UserID
-from app.domain.models.EntityIDModel import QuestID
-from app.domain.models.EntityIDModel import SummaryID
-from app.domain.models.user.PlayerModel import PlayerID
-from app.domain.models.user.RefereeModel import RefereeID
+from app.domain.models.EntityIDModel import UserID, QuestID, SummaryID
 
 class SummaryKind(str, Enum):
   PLAYER = "PLAYER"
@@ -31,5 +27,5 @@ class QuestSummary:
   last_edited_by: str = None
   
   # Optional
-  player_id: Optional[PlayerID] = None
-  referee_id: Optional[RefereeID] = None
+  player_id: Optional[UserID] = None
+  referee_id: Optional[UserID] = None

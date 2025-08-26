@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import List, Tuple, Optional
 from app.domain.usecases.ports import ForbiddenError, InvalidOperationError
 from app.domain.models.UserModel import Role, UserId, CharacterId
-from app.domain.models.QuestModel import Quest, QuestStatus
+from app.domain.models.quest.QuestModel import Quest, QuestStatus
 
 @dataclass
 class SelectRosterInput:

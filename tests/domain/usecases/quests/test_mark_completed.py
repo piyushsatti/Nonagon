@@ -1,5 +1,5 @@
 import pytest
-from app.domain.models.QuestModel import Quest, QuestStatus
+from app.domain.models.quest.QuestModel import Quest, QuestStatus
 from app.domain.usecases.ports import InvalidOperationError
 from app.domain.usecases.quests.mark_completed import mark_completed
 

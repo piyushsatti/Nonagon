@@ -24,7 +24,7 @@ class MongoSummariesRepo(SummariesRepo):
     self.col: AsyncIOMotorCollection = db["summaries"]
 
   @classmethod
-  async def create(cls, db: AsyncIOMotorDatabase) -> "MongoSummariesRepo":
+  async def create(cls, db: AsyncIOMotorDatabase) -> MongoSummariesRepo:
     self = cls(db)
     await self.col.create_index("summary_id", unique=True)
     return self

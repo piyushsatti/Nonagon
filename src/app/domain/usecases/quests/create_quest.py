@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional, List
 from app.domain.usecases.ports import ForbiddenError
 from app.domain.models.UserModel import Role, UserId
-from app.domain.models.QuestModel import Quest
+from app.domain.models.quest.QuestModel import Quest
 
 @dataclass
 class CreateQuestInput:

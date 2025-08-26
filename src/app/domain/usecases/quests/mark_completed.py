@@ -1,5 +1,5 @@
 from app.domain.usecases.ports import InvalidOperationError
-from app.domain.models.QuestModel import Quest, QuestStatus
+from app.domain.models.quest.QuestModel import Quest, QuestStatus
 
 async def mark_completed(quests_repo, quest_id: str) -> Quest:
     q = await quests_repo.get(quest_id)

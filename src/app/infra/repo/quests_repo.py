@@ -62,7 +62,7 @@ class MongoQuestsRepo(QuestsRepo):
     self.col: AsyncIOMotorCollection = db["quests"]
 
   @classmethod
-  async def create(cls, db: AsyncIOMotorDatabase) -> "MongoQuestsRepo":
+  async def create(cls, db: AsyncIOMotorDatabase) -> MongoQuestsRepo:
     self = cls(db)
     await self.col.create_index("quest_id", unique=True)
     return self

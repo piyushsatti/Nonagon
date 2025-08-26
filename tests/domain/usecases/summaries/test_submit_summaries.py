@@ -2,8 +2,8 @@ import pytest
 from datetime import datetime
 
 from app.domain.models.UserModel import User, Role, PlayerProfile, RefereeProfile
-from app.domain.models.QuestModel import Quest
-from app.domain.models.SummaryModel import SummaryKind
+from app.domain.models.quest.QuestModel import Quest
+from app.domain.models.quest.SummaryModel import SummaryKind
 
 from app.domain.usecases.summaries.submit_summary import submit_summary, SubmitSummaryInput
 from app.domain.usecases.ports import ForbiddenError

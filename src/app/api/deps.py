@@ -1,4 +1,5 @@
 from app.infra.db import get_db
+
 from app.infra.repo.users_repo import MongoUsersRepo
 from app.infra.repo.quests_repo import MongoQuestsRepo
 from app.infra.repo.summaries_repo import MongoSummariesRepo

@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional
 from app.domain.usecases.ports import ForbiddenError
 from app.domain.models.UserModel import Role, UserId
-from app.domain.models.SummaryModel import QuestSummary, SummaryKind
+from app.domain.models.quest.SummaryModel import QuestSummary, SummaryKind
 
 @dataclass
 class SubmitSummaryInput:

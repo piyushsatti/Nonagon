@@ -1,6 +1,6 @@
 from typing import Optional
 from app.domain.usecases.ports import InvalidOperationError
-from app.domain.models.QuestModel import Quest, QuestStatus
+from app.domain.models.quest.QuestModel import Quest, QuestStatus
 
 async def announce_quest(
     quests_repo,
