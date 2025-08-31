@@ -93,6 +93,21 @@ class Quest:
 
   # ---------- Helpers ----------
 
+  def validate_quest(self) -> None:
+
+    if self.starting_at and self.duration:
+      if self.duration < timedelta(minutes=60):
+        raise ValueError("Duration must be at least 60 minutes.")
+    
+    if self.starting_at and self.starting_at < datetime.now():
+      raise ValueError("Starting time must be in the future.")
+
+    if self.duration and self.duration < timedelta(minutes=15):
+      raise ValueError("Duration must be at least 15 minutes.")
+
+    if self.image_url and not (self.image_url.startswith("http://") or self.image_url.startswith("https://")):
+      raise ValueError("Image URL must start with http:// or https://")
+
   def from_dict(self, data: Dict[str, any]) -> Quest:
     valid = {f.name for f in fields(self.__dict__)}
     filtered = {k: v for k, v in data.items() if k in valid}
