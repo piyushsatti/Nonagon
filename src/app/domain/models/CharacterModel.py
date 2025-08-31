@@ -24,15 +24,15 @@ class Character:
   status: CharacterRole = CharacterRole.ACTIVE
 
   # Telemetry
-  created_at: datetime
-  last_played_at: datetime
+  created_at: datetime = None
+  last_played_at: datetime = None
   quests_played: int = 0 
   summaries_written: int = 0
 
   # Optional fields
   description: str = None
   notes: str = None
-  tags: Tuple[str] = field(default_factory=Tuple) # custom tags
+  tags: List[str] = field(default_factory=list) # custom tags
 
   # Links
   played_with: List[CharacterID] = field(default_factory=list)
@@ -50,15 +50,13 @@ class Character:
     return asdict(self)
   
   # ---------- Tag Management ----------
-  def add_tag(char: Character, tag: tuple) -> None:
+  def add_tag(char: Character, tag: list) -> None:
     if tag not in char.tags:
-      char.tags += tag
+      char.tags.append(tag)
     
   def remove_tag(char: Character, tag: str) -> None:
     if tag in char.tags:
-      tags = list(char.tags)
-      tags.remove(tag)
-      char.tags = tuple(tags)
+      char.tags.remove(tag)
 
   # ------- Active Management -------
   def is_active(self) -> bool:
