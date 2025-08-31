@@ -1,0 +1,109 @@
+from __future__ import annotations
+from dataclasses import dataclass, field, fields, replace, asdict
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import List, Tuple, Dict
+
+from app.domain.models.EntityIDModel import UserID, QuestID, CharacterID, SummaryID
+
+class QuestStatus(Enum):
+  ANNOUNCED = "ANNOUNCED"
+  COMPLETED = "COMPLETED"
+  CANCELLED = "CANCELLED"
+
+
+class PlayerStatus(Enum):
+  APPLIED = "APPLIED"
+  SELECTED = "SELECTED"
+
+
+@dataclass
+class Quest:
+  # Identity / owner
+  quest_id: QuestID
+  referee_id: UserID  # Referee responsible
+  channel_id: str
+  message_id: str
+
+  # Metadata
+  raw: str  # raw markdown input
+  title: str = None
+  description: str = None
+  starting_at: datetime = None
+  duration: timedelta = None
+  image_url: str = None
+
+  # Links
+  linked_quests: List[QuestID] = field(default_factory=list)
+  linked_summaries: List[SummaryID] = field(default_factory=list)
+
+  # Lifecycle
+  status: QuestStatus = QuestStatus.ANNOUNCED
+  started_at: datetime = None
+  ended_at: datetime = None
+  signups: Tuple[PlayerSignUp] = field(default_factory=list)
+
+  # Telemetry / follow-ups
+  player_summary_needed: bool = True
+  referee_summary_needed: bool = True
+
+  # ------- Status Helpers -------
+  def set_completed(self) -> None:
+    if self.status is QuestStatus.ANNOUNCED:
+      raise ValueError("Can only COMPLETE from ANNOUNCED.")
+   
+    self.status = QuestStatus.COMPLETED
+
+  def set_cancelled(self) -> None:
+    if self.status is QuestStatus.ANNOUNCED:
+      raise ValueError("Can only CANCEL from ANNOUNCED.")
+   
+    self.status = QuestStatus.CANCELLED
+
+  def set_announced(self) -> None:
+    if self.status is QuestStatus.CANCELLED:
+      raise ValueError("Can only set ANNOUNCED from CANCELLED")
+   
+    self.status = QuestStatus.ANNOUNCED
+
+  # ------- Signup Helpers -------
+
+  def add_signup(self, user_id: UserID, character_id: CharacterID) -> None:
+    for s in self.signups:
+      if s.user_id == user_id:
+        raise ValueError(f"User {user_id} already signed up")
+      
+    self.signups += (PlayerSignUp(user_id=user_id, character_id=character_id,),)
+
+  def remove_signup(self, user_id: UserID) -> None:
+    for i, s in enumerate(self.signups):
+      if s.user_id == user_id:
+        self.signups.pop(i)
+        return
+      
+    raise ValueError(f"User {user_id} not signed up")
+
+  def select_signup(self, user_id: UserID) -> None:
+    for s in self.signups:
+      if s.user_id == user_id:
+        s.status = PlayerStatus.SELECTED
+        return
+      
+    raise ValueError(f"User {user_id} not signed up")
+
+  # ---------- Helpers ----------
+
+  def from_dict(self, data: Dict[str, any]) -> Quest:
+    valid = {f.name for f in fields(self.__dict__)}
+    filtered = {k: v for k, v in data.items() if k in valid}
+    return replace(self, **filtered)
+
+  def to_dict(self) -> Dict[str, any]:
+    return asdict(self)
+
+
+@dataclass
+class PlayerSignUp:
+  user_id: UserID
+  character_id: CharacterID
+  status: PlayerStatus = PlayerStatus.APPLIED

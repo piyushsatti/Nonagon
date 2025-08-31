@@ -38,7 +38,7 @@ class User:
   player: Optional[Player] = None
   referee: Optional[Referee] = None
 
-  # ---------- helpers ----------
+  # ---------- User helpers ----------
   def add_role(self, role: Role) -> None:
     if role not in self.roles:
       self.roles.append(role)
@@ -58,6 +58,8 @@ class User:
     if self.referee is None:
       self.referee = Referee()
       self.referee.from_dict()
+
+  # ---------- Helpers ----------
 
   def from_dict(self, data: Dict[str, Any]) -> User:
     valid = {f.name for f in fields(self.__dict__)}
