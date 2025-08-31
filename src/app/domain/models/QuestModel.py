@@ -8,6 +8,7 @@ from app.domain.models.EntityIDModel import UserID, QuestID, CharacterID, Summar
 
 class QuestStatus(Enum):
   ANNOUNCED = "ANNOUNCED"
+  SIGNUP_CLOSED = "SIGNUP_CLOSED"
   COMPLETED = "COMPLETED"
   CANCELLED = "CANCELLED"
 
@@ -43,28 +44,28 @@ class Quest:
   ended_at: datetime = None
   signups: Tuple[PlayerSignUp] = field(default_factory=list)
 
-  # Telemetry / follow-ups
-  player_summary_needed: bool = True
-  referee_summary_needed: bool = True
-
   # ------- Status Helpers -------
   def set_completed(self) -> None:
-    if self.status is QuestStatus.ANNOUNCED:
-      raise ValueError("Can only COMPLETE from ANNOUNCED.")
-   
     self.status = QuestStatus.COMPLETED
 
   def set_cancelled(self) -> None:
-    if self.status is QuestStatus.ANNOUNCED:
-      raise ValueError("Can only CANCEL from ANNOUNCED.")
-   
     self.status = QuestStatus.CANCELLED
 
   def set_announced(self) -> None:
-    if self.status is QuestStatus.CANCELLED:
-      raise ValueError("Can only set ANNOUNCED from CANCELLED")
-   
     self.status = QuestStatus.ANNOUNCED
+
+  def close_signups(self) -> None:
+    self.status = QuestStatus.SIGNUP_CLOSED
+
+  # ------- Property Helpers -------
+
+  @property
+  def is_summary_needed(self) -> bool:
+    return self.status is QuestStatus.COMPLETED and len(self.linked_summaries) == 0
+  
+  @property
+  def is_signup_open(self) -> bool:
+    return self.status is QuestStatus.ANNOUNCED
 
   # ------- Signup Helpers -------
 
