@@ -69,6 +69,21 @@ class User:
   def is_referee(self) -> bool:
     return Role.REFEREE in self.roles
 
+  @property
+  def is_member(self) -> bool:
+    return Role.MEMBER in self.roles
+  
+  @property
+  def is_character_owner(self, char_id: CharacterID) -> bool:
+
+    if not self.is_player:
+      raise ValueError("User is not a player")
+
+    if char_id in self.player.characters:
+      return True
+    
+    return False
+
   def from_dict(self, data: Dict[str, Any]) -> User:
     valid = {f.name for f in fields(self.__dict__)}
     filtered = {k: v for k, v in data.items() if k in valid}
