@@ -27,12 +27,12 @@ class QuestSummary:
   # Telemetry
   created_on: datetime
   last_edited_at: datetime = None
-  players: Tuple[UserID] = field(default_factory=list)
-  characters: Tuple[CharacterID] = field(default_factory=tuple)
+  players: List[UserID] = field(default_factory=list)
+  characters: List[CharacterID] = field(default_factory=list)
 
   # Links
-  linked_quests: Tuple[QuestID] = field(default_factory=tuple)
-  linked_summaries: Tuple[SummaryID] = field(default_factory=tuple)
+  linked_quests: List[QuestID] = field(default_factory=list)
+  linked_summaries: List[SummaryID] = field(default_factory=list)
   
   # ---------- Helpers ----------
   def from_dict(self, data: Dict[str, any]) -> QuestSummary:
