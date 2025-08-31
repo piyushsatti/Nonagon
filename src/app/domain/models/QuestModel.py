@@ -42,7 +42,7 @@ class Quest:
   status: QuestStatus = QuestStatus.ANNOUNCED
   started_at: datetime = None
   ended_at: datetime = None
-  signups: Tuple[PlayerSignUp] = field(default_factory=list)
+  signups: List[PlayerSignUp] = field(default_factory=list)
 
   # ------- Status Helpers -------
   def set_completed(self) -> None:
@@ -73,13 +73,13 @@ class Quest:
     for s in self.signups:
       if s.user_id == user_id:
         raise ValueError(f"User {user_id} already signed up")
-      
-    self.signups += (PlayerSignUp(user_id=user_id, character_id=character_id,),)
+    
+    self.signups.append(PlayerSignUp(user_id=user_id, character_id=character_id))
 
   def remove_signup(self, user_id: UserID) -> None:
-    for i, s in enumerate(self.signups):
+    for s in self.signups:
       if s.user_id == user_id:
-        self.signups.pop(i)
+        self.signups.remove(s)
         return
       
     raise ValueError(f"User {user_id} not signed up")
