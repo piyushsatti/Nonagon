@@ -39,6 +39,7 @@ class User:
   referee: Optional[Referee] = None
 
   # ---------- User helpers ----------
+
   def add_role(self, role: Role) -> None:
     if role not in self.roles:
       self.roles.append(role)
@@ -171,6 +172,52 @@ class User:
 
   # ---------- Helpers ----------
 
+  def validate_user(self) -> None:
+
+    if not isinstance(self.user_id, UserID):
+      raise ValueError("user_id must be a UserID")
+    
+    if self.discord_id is not None and not isinstance(self.discord_id, str):
+      raise ValueError("discord_id must be a string or None")
+    
+    if self.dm_channel_id is not None and not isinstance(self.dm_channel_id, str):
+      raise ValueError("dm_channel_id must be a string or None")
+    
+    if self.joined_at is not None and not isinstance(self.joined_at, datetime):
+      raise ValueError("joined_at must be a datetime or None")
+    
+    if self.last_active_at is not None and not isinstance(self.last_active_at, datetime):
+      raise ValueError("last_active_at must be a datetime or None")
+    
+    if not isinstance(self.messages_count_total, int) or self.messages_count_total < 0:
+      raise ValueError("messages_count_total must be a non-negative integer")
+    
+    if not isinstance(self.reactions_given, int) or self.reactions_given < 0:
+      raise ValueError("reactions_given must be a non-negative integer")
+    
+    if not isinstance(self.reactions_received, int) or self.reactions_received < 0:
+      raise ValueError("reactions_received must be a non-negative integer")
+    
+    if not isinstance(self.voice_total_time_spent, (int, float)) or self.voice_total_time_spent < 0:
+      raise ValueError("voice_total_time_spent must be a non-negative number")
+    
+    if not isinstance(self.roles, list) or not all(isinstance(r, Role) for r in self.roles):
+      raise ValueError("roles must be a list of Role enums")
+    
+    if self.is_player and self.player is None:
+      raise ValueError("Player profile must be set if user has PLAYER role")
+    
+    if self.is_referee and self.referee is None:
+      raise ValueError("Referee profile must be set if user has REFEREE role")
+
+    if self.player is not None:
+      self.player.validate_player()
+    
+    if self.referee is not None:
+      self.referee.validate_referee()
+
+  # ---------- Serialization ----------
+
   def from_dict(self, data: Dict[str, Any]) -> User:
     valid = {f.name for f in fields(self.__dict__)}
     filtered = {k: v for k, v in data.items() if k in valid}
@@ -256,6 +303,35 @@ class Player():
       del self.played_with_character[char_id]
 
   # ---------- helpers ----------
+
+  def validate_player(self) -> None:
+
+    if not isinstance(self.characters, list) or not all(isinstance(c, CharacterID) for c in self.characters):
+      raise ValueError("characters must be a list of CharacterID")
+    
+    if self.joined_on is not None and not isinstance(self.joined_on, datetime):
+      raise ValueError("joined_on must be a datetime or None")
+    
+    if self.created_first_character_on is not None and not isinstance(self.created_first_character_on, datetime):
+      raise ValueError("created_first_character_on must be a datetime or None")
+    
+    if self.last_played_on is not None and not isinstance(self.last_played_on, datetime):
+      raise ValueError("last_played_on must be a datetime or None")
+    
+    if not isinstance(self.quests_applied, list) or not all(isinstance(q, QuestID) for q in self.quests_applied):
+      raise ValueError("quests_applied must be a list of QuestID")
+    
+    if not isinstance(self.quests_played, list) or not all(isinstance(q, QuestID) for q in self.quests_played):
+      raise ValueError("quests_played must be a list of QuestID")
+    
+    if not isinstance(self.summaries_written, list) or not all(isinstance(s, SummaryID) for s in self.summaries_written):
+      raise ValueError("summaries_written must be a list of SummaryID")
+    
+    if not isinstance(self.played_with_character, dict) or not all(isinstance(k, CharacterID) and isinstance(v, tuple) and len(v) == 2 and isinstance(v[0], int) and isinstance(v[1], (int, float)) for k, v in self.played_with_character.items()):
+      raise ValueError("played_with_character must be a dict of {CharacterID: (int, float)}")
+
+  # ---------- Serialization helper ----------
+
   def from_dict(self, data: Dict[str, Any]) -> Player:
     valid = {f.name for f in fields(self.__dict__)}
     filtered = {k: v for k, v in data.items() if k in valid}
@@ -325,6 +401,29 @@ class Referee():
       del self.hosted_for[user_id]
 
   # ---------- helpers ----------
+
+  def validate_referee(self) -> None:
+
+    if not isinstance(self.quests_hosted, list) or not all(isinstance(q, QuestID) for q in self.quests_hosted):
+      raise ValueError("quests_hosted must be a list of QuestID")
+    
+    if not isinstance(self.summaries_written, list) or not all(isinstance(s, SummaryID) for s in self.summaries_written):
+      raise ValueError("summaries_written must be a list of SummaryID")
+    
+    if self.first_dmed_on is not None and not isinstance(self.first_dmed_on, datetime):
+      raise ValueError("first_dmed_on must be a datetime or None")
+    
+    if self.last_dmed_on is not None and not isinstance(self.last_dmed_on, datetime):
+      raise ValueError("last_dmed_on must be a datetime or None")
+    
+    if not isinstance(self.collabed_with, dict) or not all(isinstance(k, UserID) and isinstance(v, tuple) and len(v) == 2 and isinstance(v[0], int) and isinstance(v[1], (int, float)) for k, v in self.collabed_with.items()):
+      raise ValueError("collabed_with must be a dict of {UserID: (int, float)}")
+    
+    if not isinstance(self.hosted_for, dict) or not all(isinstance(k, UserID) and isinstance(v, int) and v >= 0 for k, v in self.hosted_for.items()):
+      raise ValueError("hosted_for must be a dict of {UserID: int}")
+
+  # ---------- Serialization helper ----------
+
   def from_dict(self, data: Dict[str, Any]) -> Referee:
     valid = {f.name for f in fields(self.__dict__)}
     filtered = {k: v for k, v in data.items() if k in valid}
