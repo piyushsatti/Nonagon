@@ -114,7 +114,7 @@ class Character:
     if self.created_at is None:
       raise ValueError("created_at must be set before setting last_played_at")
     
-    if self.last_played_at < self.created_at:
+    if played_at < self.created_at:
       raise ValueError("last_played_at cannot be before created_at")
     
     self.last_played_at = played_at

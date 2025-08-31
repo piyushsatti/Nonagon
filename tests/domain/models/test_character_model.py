@@ -34,7 +34,6 @@ def test_activation_and_change_attributes(now):
     assert c.description == "New desc"
 
 
-@pytest.mark.xfail(reason="update_last_played compares current last_played_at instead of the provided played_at")
 def test_update_last_played_rejects_earlier_than_created(now):
     c = make_character(now)
     earlier = now - timedelta(days=1)

@@ -48,7 +48,6 @@ class User:
     self.add_role(Role.PLAYER)
     if self.player is None:
       self.player = Player()
-      self.player.from_dict()
   
   def disable_player(self) -> None:
     
@@ -62,13 +61,11 @@ class User:
 
   def enable_referee(self) -> None:
     if Role.PLAYER not in self.roles:
-      self.enable_player(self)
-      self.player.from_dict()
+      self.enable_player()
 
     self.add_role(Role.REFEREE)
     if self.referee is None:
       self.referee = Referee()
-      self.referee.from_dict()
 
   def disable_referee(self) -> None:
     
@@ -76,6 +73,13 @@ class User:
       self.roles.remove(Role.REFEREE)
     
     self.referee = None
+
+  def is_character_owner(self, char_id: CharacterID) -> bool:
+
+    if not self.player:
+      return False
+    
+    return char_id in self.player.characters
 
   # ---------- Properties ----------
 
@@ -90,17 +94,6 @@ class User:
   @property
   def is_member(self) -> bool:
     return Role.MEMBER in self.roles
-  
-  @property
-  def is_character_owner(self, char_id: CharacterID) -> bool:
-
-    if not self.is_player:
-      raise ValueError("User is not a player")
-
-    if char_id in self.player.characters:
-      return True
-    
-    return False
 
   # ---------- Getter ----------
 
@@ -132,7 +125,7 @@ class User:
 
   def update_joined_at(self, joined_at: datetime, override: bool = False) -> None:
 
-    if self.joined_at is not None or not override:
+    if self.joined_at is not None and not override:
       raise ValueError("joined_at is already set. Use override=True to force change.")
     
     self.joined_at = joined_at

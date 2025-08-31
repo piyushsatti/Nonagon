@@ -64,7 +64,6 @@ def test_add_and_select_signup():
     assert q.signups[0].status.name == "SELECTED"
 
 
-@pytest.mark.xfail(reason="remove_signup uses tuple.pop; signups are a tuple, so removal fails")
 def test_remove_signup_removes_player():
     q = make_quest(datetime.now())
     uid = UserID(1)
