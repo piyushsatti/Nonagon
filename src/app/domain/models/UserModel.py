@@ -61,6 +61,14 @@ class User:
 
   # ---------- Helpers ----------
 
+  @property
+  def is_player(self) -> bool:
+    return Role.PLAYER in self.roles
+
+  @property
+  def is_referee(self) -> bool:
+    return Role.REFEREE in self.roles
+
   def from_dict(self, data: Dict[str, Any]) -> User:
     valid = {f.name for f in fields(self.__dict__)}
     filtered = {k: v for k, v in data.items() if k in valid}
