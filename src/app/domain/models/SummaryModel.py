@@ -23,7 +23,6 @@ class QuestSummary:
   raw: str
   title: str
   description: str
-  created_on: datetime
 
   # Telemetry
   created_on: datetime
