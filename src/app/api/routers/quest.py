@@ -5,7 +5,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_quests_repo
-from app.domain.models.quest.QuestModel import Quest
+from app.domain.models.QuestModel import Quest
 from app.api.schemas import QuestSchema
 
 from app.domain.models.EntityIDModel import QuestID

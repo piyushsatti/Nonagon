@@ -5,7 +5,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_summaries_repo
-from app.domain.models.quest.SummaryModel import QuestSummary
+from app.domain.models.SummaryModel import QuestSummary
 from app.api.schemas import SummarySchema
 
 from app.domain.models.EntityIDModel import SummaryID

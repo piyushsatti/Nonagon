@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-from app.domain.models.quest.QuestModel import Quest
-from app.domain.models.quest.SummaryModel import QuestSummary
-from app.domain.models.quest.CharacterModel import Character
-from app.domain.models.user.UserModel import User
+from app.domain.models.QuestModel import Quest
+from app.domain.models.SummaryModel import QuestSummary
+from app.domain.models.CharacterModel import Character
+from app.domain.models.UserModel import User
 
 
 class UserSchema(BaseModel, User):

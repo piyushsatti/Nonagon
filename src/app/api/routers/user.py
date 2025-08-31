@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.domain.models.user.UserModel import User
+from app.domain.models.UserModel import User
 from app.domain.models.EntityIDModel import UserID
 from app.infra.id_counter import next_id
 from app.api.deps import get_users_repo
