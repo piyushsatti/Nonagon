@@ -4,8 +4,8 @@ from dataclasses import asdict
 
 from motor.motor_asyncio import AsyncIOMotorDatabase, AsyncIOMotorCollection
 
-from app.domain.usecases.ports import SummariesRepo, NotFoundError
-from app.domain.models.quest.SummaryModel import QuestSummary, SummaryKind
+from app.domain.usecase.ports import SummariesRepo, NotFoundError
+from app.domain.models.SummaryModel import QuestSummary, SummaryKind
 
 def _dehydrate(s: QuestSummary) -> Dict[str, Any]:
   d = asdict(s)

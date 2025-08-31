@@ -5,8 +5,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from motor.motor_asyncio import AsyncIOMotorDatabase, AsyncIOMotorCollection
 
-from app.domain.usecases.ports import QuestsRepo, NotFoundError
-from app.domain.models.quest.QuestModel import (
+from app.domain.usecase.ports import QuestsRepo, NotFoundError
+from app.domain.models.QuestModel import (
   Quest,
   QuestStatus,
   Signup,

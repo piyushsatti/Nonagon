@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any, Dict, List
 from motor.motor_asyncio import AsyncIOMotorDatabase, AsyncIOMotorCollection
 
-from app.domain.usecases.ports import UsersRepo, NotFoundError
-from app.domain.models.user.UserModel import User, Role
+from app.domain.usecase.ports import UsersRepo, NotFoundError
+from app.domain.models.UserModel import User, Role
 
 class MongoUsersRepo(UsersRepo):
   def __init__(self, db: AsyncIOMotorDatabase):
