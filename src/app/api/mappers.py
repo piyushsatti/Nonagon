@@ -38,21 +38,16 @@ def _list(xs: Optional[List[Any]]) -> List[Any]:
 # ---------- users ----------
 
 def user_to_api(u: DUser) -> APIUser:
-    return APIUser(
-        user_id=str(u.user_id),
-        roles=[r.value for r in (u.roles or [])] or None,  # keep None if truly absent
-        joined_at=_utc(u.joined_at),
-        last_active_at=_utc(u.last_active_at),
-        message_count_total=getattr(u, "message_count_total", None),
-        reactions_given=getattr(u, "reactions_given", None),
-        reactions_received=getattr(u, "reactions_received", None),
-        voice_time_total_spent=getattr(u, "voice_time_total_spent", None),
-        # Optional nested profiles (keep them as light dicts)
-        player=({"characters": [str(c) for c in getattr(u.player, "characters", [])]}
-                if getattr(u, "player", None) else None),
-        referee=({"quests_hosted": [str(q) for q in getattr(u.referee, "quests_hosted", [])]}
-                 if getattr(u, "referee", None) else None),
-    )
+  return APIUser(
+    user_id = u.user_id,
+    roles = [r.value for r in u.roles],
+    joined_at = u.joined_at,
+    last_active_at = u.last_active_at,
+    message_count_total = u.messages_count_total,
+    reactions_given = u.reactions_given,
+    reactions_received = u.reactions_received,
+    voice_time_total_spent = u.voice_total_time_spent
+  )
 
 # ---------- characters ----------
 

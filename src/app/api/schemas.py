@@ -11,10 +11,11 @@ SummaryKind = Literal["PLAYER", "REFEREE"]
 
 # --- Users ---
 class UserIn(BaseModel):
-  user_id: str
-  roles: Optional[List[UserRole]] = None
+  pass
 
 class User(UserIn):
+  user_id: str
+  roles: List[UserRole] = None
   joined_at: Optional[datetime] = None
   last_active_at: Optional[datetime] = None
   message_count_total: Optional[int] = None
