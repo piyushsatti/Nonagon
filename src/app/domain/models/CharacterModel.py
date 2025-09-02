@@ -14,8 +14,8 @@ class CharacterRole(Enum):
 @dataclass
 class Character:
   # Identity
-  owner_id: UserID
   character_id: str
+  owner_id: UserID
   name: str
   ddb_link: str
   character_thread_link: str
