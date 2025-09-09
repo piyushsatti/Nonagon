@@ -13,13 +13,38 @@ license = "MIT"
 dependencies = [
   "discord.py>=2.5",
   "pymongo>=4.0",
+  "motor>=3.4",
   "python-dotenv>=1.0",
   "fastapi>=0.110",
   "uvicorn[standard]>=0.29",
   "python-jose[cryptography]>=3.3",
-  "passlib[bcrypt]>=1.7",
-  "motor>=3.4"
+  "passlib[bcrypt]>=1.7"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "pytest-cov>=4.0",
+  "requests>=2.32",
+  "black>=24.1",
+  "ruff>=0.1"
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-q -ra --strict-markers"
+asyncio_mode = "auto"
+pythonpath = ["src"]
+
+[tool.coverage.run]
+source = ["src/app"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
