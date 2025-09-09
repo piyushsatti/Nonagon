@@ -1,12 +1,13 @@
 # app/infra/mongo/serialization.py
 from __future__ import annotations
 
-from dataclasses import is_dataclass, fields
+from dataclasses import fields, is_dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, get_origin, get_args, Union
+from typing import Any, Union, get_args, get_origin
 
 # ---------- Encoding (Python -> BSON-friendly) ----------
+
 
 def to_bson(x: Any) -> Any:
     # Enums -> their .value (str/int) so PyMongo can encode them
@@ -39,6 +40,7 @@ def to_bson(x: Any) -> Any:
 
 
 # ---------- Decoding (BSON -> Python/dataclasses) ----------
+
 
 def from_bson(cls: type, doc: Any) -> Any:
     """
@@ -97,8 +99,11 @@ def _from_bson_value(expected_type: Any, value: Any) -> Any:
     # Datetime: assume stored as naive UTC; return UTC-aware
     if expected_type is datetime:
         if isinstance(value, datetime):
-            return value.replace(tzinfo=timezone.utc) if value.tzinfo is None \
-                   else value.astimezone(timezone.utc)
+            return (
+                value.replace(tzinfo=timezone.utc)
+                if value.tzinfo is None
+                else value.astimezone(timezone.utc)
+            )
         # If somehow stored as numeric (shouldn't be), try seconds since epoch:
         if isinstance(value, (int, float)):
             return datetime.fromtimestamp(value, tz=timezone.utc)

@@ -1,6 +1,8 @@
 # app/infra/mongo/characters_repo.py
 from __future__ import annotations
+
 from typing import Optional
+
 from app.domain.models.CharacterModel import Character
 from app.domain.models.EntityIDModel import CharacterID
 from app.domain.usecase.ports import CharactersRepo
@@ -8,6 +10,7 @@ from app.infra.db import get_db, next_id
 from app.infra.mongo.mappers import dataclass_to_mongo, mongo_to_dataclass
 
 COLL = lambda: get_db()["characters"]
+
 
 class CharactersRepoMongo(CharactersRepo):
     async def get(self, character_id: str) -> Optional[Character]:

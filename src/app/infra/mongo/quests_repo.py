@@ -1,11 +1,14 @@
 from __future__ import annotations
-from app.infra.db import get_db, next_id
-from app.domain.models.QuestModel import Quest
+
 from app.domain.models.EntityIDModel import QuestID
-from app.infra.serialization import to_bson, from_bson
+from app.domain.models.QuestModel import Quest
+from app.infra.db import get_db, next_id
+from app.infra.serialization import from_bson, to_bson
+
 
 def COLL():
     return get_db()["quests"]
+
 
 class QuestsRepoMongo:
     async def upsert(self, quest: Quest) -> bool:

@@ -1,14 +1,17 @@
 from __future__ import annotations
+
 from typing import Optional
 
-from app.domain.models.SummaryModel import QuestSummary
 from app.domain.models.EntityIDModel import SummaryID
+from app.domain.models.SummaryModel import QuestSummary
 from app.domain.usecase.ports import SummariesRepo
 from app.infra.db import get_db, next_id
 from app.infra.mongo.mappers import dataclass_to_mongo, mongo_to_dataclass
 
+
 def _coll():
     return get_db()["summaries"]
+
 
 class SummariesRepoMongo(SummariesRepo):
     async def get(self, summary_id: str) -> Optional[QuestSummary]:

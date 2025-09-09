@@ -1,13 +1,17 @@
 from fastapi import APIRouter, HTTPException, Request
-from app.domain.models.EntityIDModel import UserID, CharacterID, QuestID, SummaryID
-from app.domain.usecase.unit import character_unit
-from app.api.schemas import Character as APIChar, CharacterIn as APICharIn
+
 from app.api.mappers import char_to_api
+from app.api.schemas import Character as APIChar
+from app.api.schemas import CharacterIn as APICharIn
+from app.domain.models.EntityIDModel import CharacterID, QuestID, SummaryID, UserID
+from app.domain.usecase.unit import character_unit
 
 router = APIRouter(prefix="/v1/characters", tags=["Characters"])
 
+
 def _repos(req: Request):
     return req.app.state  # users_repo, chars_repo, quests_repo, summaries_repo
+
 
 @router.post(
     "",
@@ -34,6 +38,7 @@ def create_character(request: Request, body: APICharIn):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @router.get(
     "/{character_id}",
     response_model=APIChar,
@@ -41,10 +46,13 @@ def create_character(request: Request, body: APICharIn):
 )
 def get_character(request: Request, character_id: str):
     try:
-        ch = character_unit.get_character(_repos(request).chars_repo, CharacterID.parse(character_id))
+        ch = character_unit.get_character(
+            _repos(request).chars_repo, CharacterID.parse(character_id)
+        )
         return char_to_api(ch)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
 
 @router.patch(
     "/{character_id}",
@@ -77,12 +85,16 @@ def patch_character(request: Request, character_id: str, body: APICharIn):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @router.delete("/{character_id}", status_code=204)
 def delete_character(request: Request, character_id: str):
     try:
-        character_unit.delete_character(_repos(request).chars_repo, CharacterID.parse(character_id))
+        character_unit.delete_character(
+            _repos(request).chars_repo, CharacterID.parse(character_id)
+        )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
 
 # --- Telemetry ---
 @router.post(
@@ -92,10 +104,13 @@ def delete_character(request: Request, character_id: str):
 )
 def inc_quests_played(request: Request, character_id: str):
     try:
-        ch = character_unit.increment_quests_played(_repos(request).chars_repo, CharacterID.parse(character_id))
+        ch = character_unit.increment_quests_played(
+            _repos(request).chars_repo, CharacterID.parse(character_id)
+        )
         return char_to_api(ch)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
 
 @router.post(
     "/{character_id}:incrementSummariesWritten",
@@ -104,10 +119,13 @@ def inc_quests_played(request: Request, character_id: str):
 )
 def inc_summaries_written(request: Request, character_id: str):
     try:
-        ch = character_unit.increment_summaries_written(_repos(request).chars_repo, CharacterID.parse(character_id))
+        ch = character_unit.increment_summaries_written(
+            _repos(request).chars_repo, CharacterID.parse(character_id)
+        )
         return char_to_api(ch)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
 
 @router.post(
     "/{character_id}:updateLastPlayed",
@@ -116,10 +134,13 @@ def inc_summaries_written(request: Request, character_id: str):
 )
 def update_last_played(request: Request, character_id: str):
     try:
-        ch = character_unit.update_last_played_at(_repos(request).chars_repo, CharacterID.parse(character_id))
+        ch = character_unit.update_last_played_at(
+            _repos(request).chars_repo, CharacterID.parse(character_id)
+        )
         return char_to_api(ch)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
 
 # --- Links ---
 @router.post(
@@ -138,6 +159,7 @@ def add_played_with(request: Request, character_id: str, other_id: str):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @router.delete(
     "/{character_id}/playedWith/{other_id}",
     response_model=APIChar,
@@ -153,6 +175,7 @@ def remove_played_with(request: Request, character_id: str, other_id: str):
         return char_to_api(ch)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
 
 @router.post(
     "/{character_id}/playedIn/{quest_id}",
@@ -170,6 +193,7 @@ def add_played_in(request: Request, character_id: str, quest_id: str):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @router.delete(
     "/{character_id}/playedIn/{quest_id}",
     response_model=APIChar,
@@ -186,6 +210,7 @@ def remove_played_in(request: Request, character_id: str, quest_id: str):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @router.post(
     "/{character_id}/mentionedIn/{summary_id}",
     response_model=APIChar,
@@ -201,6 +226,7 @@ def add_mentioned_in(request: Request, character_id: str, summary_id: str):
         return char_to_api(ch)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
 
 @router.delete(
     "/{character_id}/mentionedIn/{summary_id}",

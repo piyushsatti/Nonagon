@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 from typing import Optional, Type, TypeVar
+
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo import ReturnDocument
 
-from app.infra.settings import MONGODB_URI, DB_NAME
 from app.domain.models.EntityIDModel import EntityID
+from app.infra.settings import DB_NAME, MONGODB_URI
 
 _client: Optional[AsyncIOMotorClient] = None
 T = TypeVar("T", bound=EntityID)
@@ -30,6 +31,7 @@ def get_client() -> AsyncIOMotorClient:
 def get_db() -> AsyncIOMotorDatabase:
     return get_client()[DB_NAME]
 
+
 async def ping() -> bool:
     try:
         # admin DB per official examples
@@ -38,7 +40,6 @@ async def ping() -> bool:
     except Exception as e:
         print(f"[Mongo Ping Failed] {e}")
         return False
-
 
 
 async def next_id(id_cls: Type[T]) -> T:

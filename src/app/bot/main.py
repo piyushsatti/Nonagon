@@ -19,7 +19,7 @@ class Nonagon(commands.Bot):
     super().__init__(command_prefix="!", intents=intents)
     self.guild_data: dict[int, dict] = {}
     self.dirty_data: asyncio.Queue[tuple[int,int]] = asyncio.Queue()
-    
+
   # Called before the bot logins to discord
   async def setup_hook(self):
 
@@ -50,7 +50,7 @@ class Nonagon(commands.Bot):
     await super().start(BOT_TOKEN)
 
   # Called when the bot is ready
-  async def on_ready(self):    
+  async def on_ready(self):
     await self._load_cache()
     await self.tree.sync()
     logging.info(f"Logged in as {self.user} (ID: {self.user.id}) \nLoaded Cogs: {list(self.cogs)} \nValid Commands: {[c.name for c in self.commands]}")
@@ -63,7 +63,7 @@ class Nonagon(commands.Bot):
     tasks = [self.load_or_create_guild_cache(g) for g in self.guilds]
     await asyncio.gather(*tasks)
     logging.info("All guild caches ready.")
-  
+
   async def _auto_persist_loop(self):
     """Periodically flush *all* in-memory user caches back to MongoDB."""
     logging.info("Starting auto persist loop...")
@@ -77,7 +77,7 @@ class Nonagon(commands.Bot):
           to_flush[(gid, uid)] = self.guild_data[gid]["users"][uid]
       except asyncio.QueueEmpty:
         pass
-      
+
       for (gid, uid), user in to_flush.items():
         db = self.guild_data[gid]["db"]
         await asyncio.to_thread(
@@ -129,7 +129,7 @@ if __name__ == "__main__":
   intents = discord.Intents.default()
   intents.message_content = True
   intents.reactions       = True
-  intents.members         = True 
+  intents.members         = True
   intents.voice_states    = True
 
   asyncio.run(

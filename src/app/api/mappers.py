@@ -1,27 +1,41 @@
 from __future__ import annotations
-from datetime import datetime, timezone, timedelta
+
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-# ---- Domain models ----
-from app.domain.models.UserModel import User as DUser
-from app.domain.models.CharacterModel import Character as DCharacter, CharacterRole
-from app.domain.models.QuestModel import (
-    Quest as DQuest,
-    PlayerSignUp,
-    PlayerStatus,
-    QuestStatus as DQuestStatus,
+from app.api.schemas import (
+    Character as APIChar,
 )
-from app.domain.models.SummaryModel import QuestSummary as DSumm
+from app.api.schemas import (
+    Quest as APIQuest,
+)
+from app.api.schemas import (
+    Summary as APISummary,
+)
 
 # ---- API schemas (your new ones) ----
 from app.api.schemas import (
     User as APIUser,
-    Character as APIChar,
-    Quest as APIQuest,
-    Summary as APISummary,
 )
+from app.domain.models.CharacterModel import Character as DCharacter
+from app.domain.models.CharacterModel import CharacterRole
+from app.domain.models.QuestModel import (
+    PlayerSignUp,
+    PlayerStatus,
+)
+from app.domain.models.QuestModel import (
+    Quest as DQuest,
+)
+from app.domain.models.QuestModel import (
+    QuestStatus as DQuestStatus,
+)
+from app.domain.models.SummaryModel import QuestSummary as DSumm
+
+# ---- Domain models ----
+from app.domain.models.UserModel import User as DUser
 
 # ---------- helpers ----------
+
 
 def _utc(dt: Optional[datetime]) -> Optional[datetime]:
     """Return a timezone-aware UTC datetime or None."""
@@ -31,28 +45,35 @@ def _utc(dt: Optional[datetime]) -> Optional[datetime]:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
 
+
 def _list(xs: Optional[List[Any]]) -> List[Any]:
     """Normalize None → [] for list fields."""
     return xs or []
 
+
 # ---------- users ----------
 
+
 def user_to_api(u: DUser) -> APIUser:
-  return APIUser(
-    user_id = u.user_id,
-    roles = [r.value for r in u.roles],
-    joined_at = u.joined_at,
-    last_active_at = u.last_active_at,
-    message_count_total = u.messages_count_total,
-    reactions_given = u.reactions_given,
-    reactions_received = u.reactions_received,
-    voice_time_total_spent = u.voice_total_time_spent
-  )
+    return APIUser(
+        user_id=u.user_id,
+        roles=[r.value for r in u.roles],
+        joined_at=u.joined_at,
+        last_active_at=u.last_active_at,
+        message_count_total=u.messages_count_total,
+        reactions_given=u.reactions_given,
+        reactions_received=u.reactions_received,
+        voice_time_total_spent=u.voice_total_time_spent,
+    )
+
 
 # ---------- characters ----------
 
+
 def char_to_api(c: DCharacter) -> APIChar:
-    status = "ACTIVE" if getattr(c, "status", None) == CharacterRole.ACTIVE else "RETIRED"
+    status = (
+        "ACTIVE" if getattr(c, "status", None) == CharacterRole.ACTIVE else "RETIRED"
+    )
     return APIChar(
         character_id=str(c.character_id),
         owner_id=str(c.owner_id) if getattr(c, "owner_id", None) else None,
@@ -74,7 +95,9 @@ def char_to_api(c: DCharacter) -> APIChar:
         mentioned_in=[str(x) for x in _list(getattr(c, "mentioned_in", None))],
     )
 
+
 # ---------- quests ----------
+
 
 def _signup_to_api(s: PlayerSignUp) -> Dict[str, Any]:
     return {
@@ -83,10 +106,12 @@ def _signup_to_api(s: PlayerSignUp) -> Dict[str, Any]:
         "selected": (s.status == PlayerStatus.SELECTED),
     }
 
+
 def _duration_hours_from_timedelta(td: Optional[timedelta]) -> Optional[int]:
     if not td:
         return None
     return int(td.total_seconds() // 3600)
+
 
 def quest_to_api(q: DQuest) -> APIQuest:
     # API uses boolean signups_open instead of a “SIGNUP_CLOSED” status
@@ -102,18 +127,23 @@ def quest_to_api(q: DQuest) -> APIQuest:
         image_url=q.image_url,
         linked_quests=[str(x) for x in _list(getattr(q, "linked_quests", None))],
         linked_summaries=[str(x) for x in _list(getattr(q, "linked_summaries", None))],
-
         # Fields present only on the full API Quest
         channel_id=getattr(q, "channel_id", None),
         message_id=getattr(q, "message_id", None),
-        status=(q.status.value if isinstance(getattr(q, "status", None), DQuestStatus) else str(getattr(q, "status", "")) or "ANNOUNCED"),
+        status=(
+            q.status.value
+            if isinstance(getattr(q, "status", None), DQuestStatus)
+            else str(getattr(q, "status", "")) or "ANNOUNCED"
+        ),
         started_at=_utc(getattr(q, "started_at", None)),
         ended_at=_utc(getattr(q, "ended_at", None)),
         signups_open=bool(signups_open),
         signups=[_signup_to_api(s) for s in _list(getattr(q, "signups", None))],
     )
 
+
 # ---------- summaries ----------
+
 
 def summary_to_api(s: DSumm) -> APISummary:
     # NOTE: your schema field is spelled “descroption”; we map domain.description to that name.

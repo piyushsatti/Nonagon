@@ -1,79 +1,84 @@
 from __future__ import annotations
-from dataclasses import dataclass, field, fields, replace, asdict
-from datetime import datetime
-from enum import Enum, auto
-from typing import Optional, List, Tuple, Dict
 
-from app.domain.models.EntityIDModel import UserID, QuestID, SummaryID, CharacterID
+from dataclasses import asdict, dataclass, field, fields, replace
+from datetime import datetime
+from enum import Enum
+from typing import Dict, List
+
+from app.domain.models.EntityIDModel import CharacterID, QuestID, SummaryID, UserID
+
 
 class SummaryKind(str, Enum):
-  PLAYER = "PLAYER"
-  REFEREE = "REFEREE"
+    PLAYER = "PLAYER"
+    REFEREE = "REFEREE"
+
 
 @dataclass
 class QuestSummary:
-  
-  summary_id: SummaryID
-  kind: SummaryKind
-  author_id: UserID
-  character_id: CharacterID
-  quest_id: QuestID
 
-  # Content
-  raw: str
-  title: str
-  description: str
+    summary_id: SummaryID
+    kind: SummaryKind
+    author_id: UserID
+    character_id: CharacterID
+    quest_id: QuestID
 
-  # Telemetry
-  created_on: datetime
-  last_edited_at: datetime = None
-  players: List[UserID] = field(default_factory=list)
-  characters: List[CharacterID] = field(default_factory=list)
+    # Content
+    raw: str
+    title: str
+    description: str
 
-  # Links
-  linked_quests: List[QuestID] = field(default_factory=list)
-  linked_summaries: List[SummaryID] = field(default_factory=list)
-  
-  # ---------- Helpers ----------
-  def from_dict(self, data: Dict[str, any]) -> QuestSummary:
-    valid = {f.name for f in fields(self.__dict__)}
-    filtered = {k: v for k, v in data.items() if k in valid}
-    return replace(self, **filtered)
+    # Telemetry
+    created_on: datetime
+    last_edited_at: datetime = None
+    players: List[UserID] = field(default_factory=list)
+    characters: List[CharacterID] = field(default_factory=list)
 
-  def to_dict(self) -> Dict[str, any]:
-    return asdict(self)
-  
-  # ---------- Validation ----------
-  def validate_summary(self) -> None:
-    if self.kind not in (SummaryKind.PLAYER, SummaryKind.REFEREE):
-      raise ValueError(f"Invalid summary kind: {self.kind}")
+    # Links
+    linked_quests: List[QuestID] = field(default_factory=list)
+    linked_summaries: List[SummaryID] = field(default_factory=list)
 
-    if not self.title or not self.title.strip():
-      raise ValueError("Summary title cannot be empty")
-    
-    if not self.description or not self.description.strip():
-      raise ValueError("Summary description cannot be empty")
-    
-    if self.created_on is None:
-      raise ValueError("created_on must be set")
+    # ---------- Helpers ----------
+    def from_dict(self, data: Dict[str, any]) -> QuestSummary:
+        valid = {f.name for f in fields(self.__dict__)}
+        filtered = {k: v for k, v in data.items() if k in valid}
+        return replace(self, **filtered)
 
-    if self.author_id is None:
-      raise ValueError("author_id must be set")
+    def to_dict(self) -> Dict[str, any]:
+        return asdict(self)
 
-    if self.character_id is None:
-      raise ValueError("character_id must be set")
+    # ---------- Validation ----------
+    def validate_summary(self) -> None:
+        if self.kind not in (SummaryKind.PLAYER, SummaryKind.REFEREE):
+            raise ValueError(f"Invalid summary kind: {self.kind}")
 
-    if self.quest_id is None:
-      raise ValueError("quest_id must be set")
+        if not self.title or not self.title.strip():
+            raise ValueError("Summary title cannot be empty")
 
-    if not self.raw or not self.raw.strip():
-      raise ValueError("Summary content cannot be empty")
+        if not self.description or not self.description.strip():
+            raise ValueError("Summary description cannot be empty")
 
-    if not self.players or len(self.players) == 0:
-      raise ValueError("At least one player must be associated with the summary")
+        if self.created_on is None:
+            raise ValueError("created_on must be set")
 
-    if not self.characters or len(self.characters) == 0:
-      raise ValueError("At least one character must be associated with the summary")
+        if self.author_id is None:
+            raise ValueError("author_id must be set")
 
-    if self.last_edited_at is not None and self.last_edited_at < self.created_on:
-      raise ValueError("last_edited_at cannot be before created_on")
+        if self.character_id is None:
+            raise ValueError("character_id must be set")
+
+        if self.quest_id is None:
+            raise ValueError("quest_id must be set")
+
+        if not self.raw or not self.raw.strip():
+            raise ValueError("Summary content cannot be empty")
+
+        if not self.players or len(self.players) == 0:
+            raise ValueError("At least one player must be associated with the summary")
+
+        if not self.characters or len(self.characters) == 0:
+            raise ValueError(
+                "At least one character must be associated with the summary"
+            )
+
+        if self.last_edited_at is not None and self.last_edited_at < self.created_on:
+            raise ValueError("last_edited_at cannot be before created_on")
