@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app.domain.models.EntityIDModel import UserID, CharacterID, QuestID, SummaryID
 from app.domain.usecase.unit import summary_unit
-from app.domain.models.SummaryModel import SummaryKind as DSummaryKind
+from app.domain.models.summary.SummaryModel import SummaryKind as DSummaryKind
 from app.api.schemas import Summary as APISumm, SummaryIn as APISummIn
 from app.api.mappers import summary_to_api  # keep existing mapper name
 

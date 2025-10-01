@@ -1,13 +1,15 @@
 # app/infra/db.py
 from __future__ import annotations
 
-from typing import Optional, Type, TypeVar
+from typing import Any, Optional, Type, TypeVar
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo import ReturnDocument
 
 from app.domain.models.EntityIDModel import EntityID
 from app.infra.settings import DB_NAME, MONGODB_URI
+
+MongoDocument = dict[str, Any]
 
 _client: Optional[AsyncIOMotorClient] = None
 T = TypeVar("T", bound=EntityID)
@@ -28,7 +30,7 @@ def get_client() -> AsyncIOMotorClient:
     return _client
 
 
-def get_db() -> AsyncIOMotorDatabase:
+def get_db() -> AsyncIOMotorDatabase[MongoDocument]:
     return get_client()[DB_NAME]
 
 

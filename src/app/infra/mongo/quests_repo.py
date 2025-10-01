@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.domain.models.EntityIDModel import QuestID
-from app.domain.models.QuestModel import Quest
+from app.domain.models.quest.QuestModel import Quest
 from app.infra.db import get_db, next_id
 from app.infra.serialization import from_bson, to_bson
 

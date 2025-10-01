@@ -1,7 +1,7 @@
 # tests/test_quest_model.py
 from datetime import datetime, timedelta
 import pytest
-from app.domain.models.QuestModel import Quest, QuestStatus
+from app.domain.models.quest.QuestModel import Quest, QuestStatus
 from app.domain.models.EntityIDModel import UserID, CharacterID, QuestID
 
 

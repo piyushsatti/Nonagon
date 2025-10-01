@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime, timedelta
-from app.domain.models.SummaryModel import QuestSummary, SummaryKind
+from app.domain.models.summary.SummaryModel import QuestSummary, SummaryKind
 from app.domain.models.EntityIDModel import UserID, CharacterID, QuestID, SummaryID
 
 

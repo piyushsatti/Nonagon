@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.domain.models.EntityIDModel import UserID
-from app.domain.models.UserModel import User
+from app.domain.models.user.UserModel import User
 from app.infra.db import get_db, next_id
 from app.infra.serialization import from_bson, to_bson
 
@@ -11,6 +11,12 @@ def COLL():
 
 
 class UsersRepoMongo:
+    async def ensure_indexes(self) -> None:
+        await COLL().create_index(
+            "user_id.number", unique=True, name="uq_users_user_id"
+        )
+        await COLL().create_index("discord_id", unique=True, name="uq_users_discord")
+
     async def upsert(self, user: User) -> bool:
         doc = to_bson(user)
         filt = {"user_id.number": doc["user_id"]["number"]}

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from app.api.schemas import (
     Character as APIChar,
@@ -10,29 +10,45 @@ from app.api.schemas import (
     Quest as APIQuest,
 )
 from app.api.schemas import (
+    QuestStatus as APIQuestStatus,
+)
+from app.api.schemas import (
     Summary as APISummary,
 )
-
-# ---- API schemas (your new ones) ----
 from app.api.schemas import (
     User as APIUser,
 )
-from app.domain.models.CharacterModel import Character as DCharacter
-from app.domain.models.CharacterModel import CharacterRole
-from app.domain.models.QuestModel import (
+from app.domain.models.character.CharacterModel import (
+    Character as DCharacter,
+)
+from app.domain.models.character.CharacterModel import (
+    CharacterRole,
+)
+from app.domain.models.quest.QuestModel import (
     PlayerSignUp,
     PlayerStatus,
 )
-from app.domain.models.QuestModel import (
+from app.domain.models.quest.QuestModel import (
     Quest as DQuest,
 )
-from app.domain.models.QuestModel import (
+from app.domain.models.quest.QuestModel import (
     QuestStatus as DQuestStatus,
 )
-from app.domain.models.SummaryModel import QuestSummary as DSumm
+from app.domain.models.summary.SummaryModel import QuestSummary as DSumm
 
 # ---- Domain models ----
-from app.domain.models.UserModel import User as DUser
+from app.domain.models.user.UserModel import (
+    InteractionStats,
+)
+from app.domain.models.user.UserModel import (
+    Player as DPlayer,
+)
+from app.domain.models.user.UserModel import (
+    Referee as DReferee,
+)
+from app.domain.models.user.UserModel import (
+    User as DUser,
+)
 
 # ---------- helpers ----------
 
@@ -54,16 +70,80 @@ def _list(xs: Optional[List[Any]]) -> List[Any]:
 # ---------- users ----------
 
 
+def _stats_map_to_api(
+    data: Dict[Any, InteractionStats],
+) -> Dict[str, Dict[str, float | int]]:
+    return {
+        str(key): {
+            "occurrences": stats.occurrences,
+            "total_seconds": stats.total_seconds,
+            "total_hours": stats.total_hours,
+        }
+        for key, stats in data.items()
+    }
+
+
+def _player_to_api(player: DPlayer | None) -> Optional[Dict[str, Any]]:
+    if player is None:
+        return None
+
+    payload: Dict[str, Any] = {
+        "characters": [str(char_id) for char_id in player.characters],
+        "quests_applied": [str(qid) for qid in player.quests_applied],
+        "quests_played": [str(qid) for qid in player.quests_played],
+        "summaries_written": [str(sid) for sid in player.summaries_written],
+        "joined_on": _utc(player.joined_on),
+        "created_first_character_on": _utc(player.created_first_character_on),
+        "last_played_on": _utc(player.last_played_on),
+    }
+
+    if player.played_with_character:
+        payload["played_with_character"] = _stats_map_to_api(
+            player.played_with_character
+        )
+
+    return payload
+
+
+def _referee_to_api(referee: DReferee | None) -> Optional[Dict[str, Any]]:
+    if referee is None:
+        return None
+
+    payload: Dict[str, Any] = {
+        "quests_hosted": [str(qid) for qid in referee.quests_hosted],
+        "summaries_written": [str(sid) for sid in referee.summaries_written],
+        "first_dmed_on": _utc(referee.first_dmed_on),
+        "last_dmed_on": _utc(referee.last_dmed_on),
+    }
+
+    if referee.collabed_with:
+        payload["collabed_with"] = _stats_map_to_api(referee.collabed_with)
+
+    if referee.hosted_for:
+        payload["hosted_for"] = {
+            str(user_id): count for user_id, count in referee.hosted_for.items()
+        }
+
+    return payload
+
+
 def user_to_api(u: DUser) -> APIUser:
     return APIUser(
-        user_id=u.user_id,
-        roles=[r.value for r in u.roles],
-        joined_at=u.joined_at,
-        last_active_at=u.last_active_at,
+        user_id=str(u.user_id),
+        discord_id=u.discord_id,
+        dm_channel_id=u.dm_channel_id,
+        roles=[role.value for role in u.roles] if u.roles else None,
+        joined_at=_utc(u.joined_at),
+        last_active_at=_utc(u.last_active_at),
+        is_member=u.is_member,
+        is_player=u.is_player,
+        is_referee=u.is_referee,
         message_count_total=u.messages_count_total,
         reactions_given=u.reactions_given,
         reactions_received=u.reactions_received,
-        voice_time_total_spent=u.voice_total_time_spent,
+        voice_time_total_spent=u.voice_total_hours,
+        player=_player_to_api(u.player),
+        referee=_referee_to_api(u.referee),
     )
 
 
@@ -74,6 +154,10 @@ def char_to_api(c: DCharacter) -> APIChar:
     status = (
         "ACTIVE" if getattr(c, "status", None) == CharacterRole.ACTIVE else "RETIRED"
     )
+    created_at_utc = _utc(c.created_at)
+    if created_at_utc is None:  # pragma: no cover - defensive guard
+        raise ValueError("Character missing creation timestamp")
+
     return APIChar(
         character_id=str(c.character_id),
         owner_id=str(c.owner_id) if getattr(c, "owner_id", None) else None,
@@ -86,7 +170,7 @@ def char_to_api(c: DCharacter) -> APIChar:
         notes=c.notes,
         tags=list(getattr(c, "tags", []) or []),
         status=status,
-        created_at=_utc(c.created_at),
+        created_at=created_at_utc,
         last_played_at=_utc(getattr(c, "last_played_at", None)),
         quests_played=int(getattr(c, "quests_played", 0) or 0),
         summaries_written=int(getattr(c, "summaries_written", 0) or 0),
@@ -103,7 +187,7 @@ def _signup_to_api(s: PlayerSignUp) -> Dict[str, Any]:
     return {
         "user_id": str(s.user_id),
         "character_id": str(s.character_id),
-        "selected": (s.status == PlayerStatus.SELECTED),
+        "selected": s.status == PlayerStatus.SELECTED,
     }
 
 
@@ -116,6 +200,13 @@ def _duration_hours_from_timedelta(td: Optional[timedelta]) -> Optional[int]:
 def quest_to_api(q: DQuest) -> APIQuest:
     # API uses boolean signups_open instead of a “SIGNUP_CLOSED” status
     signups_open = getattr(q, "status", None) == DQuestStatus.ANNOUNCED
+    status_raw = getattr(q, "status", None)
+    if isinstance(status_raw, DQuestStatus):
+        status_value: APIQuestStatus = cast(APIQuestStatus, status_raw.value)
+    elif isinstance(status_raw, str) and status_raw:
+        status_value = cast(APIQuestStatus, status_raw)
+    else:
+        status_value = cast(APIQuestStatus, "ANNOUNCED")
     return APIQuest(
         quest_id=str(q.quest_id) if getattr(q, "quest_id", None) else None,
         referee_id=str(q.referee_id) if getattr(q, "referee_id", None) else None,
@@ -130,11 +221,7 @@ def quest_to_api(q: DQuest) -> APIQuest:
         # Fields present only on the full API Quest
         channel_id=getattr(q, "channel_id", None),
         message_id=getattr(q, "message_id", None),
-        status=(
-            q.status.value
-            if isinstance(getattr(q, "status", None), DQuestStatus)
-            else str(getattr(q, "status", "")) or "ANNOUNCED"
-        ),
+        status=status_value,
         started_at=_utc(getattr(q, "started_at", None)),
         ended_at=_utc(getattr(q, "ended_at", None)),
         signups_open=bool(signups_open),
@@ -147,9 +234,10 @@ def quest_to_api(q: DQuest) -> APIQuest:
 
 def summary_to_api(s: DSumm) -> APISummary:
     # NOTE: your schema field is spelled “descroption”; we map domain.description to that name.
+    kind = getattr(s, "kind", None)
     return APISummary(
         summary_id=str(s.summary_id),
-        kind=getattr(s, "kind", None).value if getattr(s, "kind", None) else None,
+        kind=kind.value if kind is not None else None,
         author_id=str(s.author_id) if getattr(s, "author_id", None) else None,
         character_id=str(s.character_id) if getattr(s, "character_id", None) else None,
         quest_id=str(s.quest_id) if getattr(s, "quest_id", None) else None,

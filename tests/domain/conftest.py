@@ -2,7 +2,7 @@ import pytest
 from datetime import datetime
 
 from app.domain.models.EntityIDModel import UserID, QuestID, CharacterID, SummaryID
-from app.domain.models.UserModel import User, Player, Referee, Role
+from app.domain.models.user.UserModel import User, Player, Referee, Role
 
 @pytest.fixture
 def now():

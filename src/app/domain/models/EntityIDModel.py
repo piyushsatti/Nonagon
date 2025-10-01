@@ -2,6 +2,8 @@ import re
 from dataclasses import dataclass
 from typing import ClassVar
 
+DRAFT_PREFIX = "DRAFT"
+
 
 @dataclass(frozen=True, slots=True)
 class EntityID:
@@ -18,7 +20,7 @@ class EntityID:
 
     @classmethod
     def parse(cls, raw: str):
-        m = re.match(r"^([A-Z]{4})(\d{4,})$", raw)
+        m = re.match(r"^([A-Z]{4,})(\d{4,})$", raw)
 
         if not m:
             raise ValueError(f"Invalid ID: {raw}")
@@ -48,3 +50,21 @@ class CharacterID(EntityID):
 @dataclass(frozen=True, slots=True)
 class SummaryID(EntityID):
     prefix: ClassVar[str] = "SUMM"
+
+
+@dataclass(frozen=True, slots=True)
+class DraftID(EntityID):
+    prefix: ClassVar[str] = DRAFT_PREFIX
+
+
+def is_valid_id(value: str, prefix: str) -> bool:
+    return bool(re.match(rf"^{prefix}[0-9]{{4,}}$", value))
+
+
+def ensure_prefix(value: str, prefix: str) -> str:
+    if value.startswith(prefix):
+        return value
+    match = re.search(r"(\d{4,})$", value)
+    if not match:
+        raise ValueError(f"Value {value} does not contain a numeric suffix")
+    return f"{prefix}{match.group(1)}"

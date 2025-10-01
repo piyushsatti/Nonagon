@@ -1,10 +1,11 @@
-
 # tests/test_user_model.py
 import math
+from datetime import datetime, timezone
+
 import pytest
-from datetime import datetime
-from app.domain.models.UserModel import User, Player, Referee, Role
-from app.domain.models.EntityIDModel import UserID, CharacterID, QuestID, SummaryID
+
+from app.domain.models.EntityIDModel import CharacterID, QuestID, SummaryID, UserID
+from app.domain.models.user.UserModel import Player, Referee, User
 
 
 def test_user_id_roundtrip():
@@ -46,7 +47,7 @@ def test_disable_player_blocked_if_referee(referee_user: User):
 def test_update_joined_at_allows_initial_set(base_user: User):
     joined = datetime(2029, 1, 1)
     base_user.update_joined_at(joined)
-    assert base_user.joined_at == joined
+    assert base_user.joined_at == joined.replace(tzinfo=timezone.utc)
 
 
 def test_counters_and_voice_time(base_user: User):
