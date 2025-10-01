@@ -176,3 +176,5 @@ cython_debug/
 
 trash/
 .DS_Store
+.vscode/
+*/.idea/*
