@@ -27,8 +27,8 @@ class QuestIngestionService:
         *,
         repo: "QuestRecordsRepository",
         id_service: "IdService",
-        quest_channel_id: int,
-        referee_role_id: int,
+        quest_channel_id: int | None,
+        referee_role_id: int | None,
         logger: logging.Logger | None = None,
     ) -> None:
         self._repo = repo
@@ -36,6 +36,17 @@ class QuestIngestionService:
         self._quest_channel_id = quest_channel_id
         self._referee_role_id = referee_role_id
         self._log = logger or logging.getLogger(__name__)
+
+    def update_configuration(
+        self,
+        *,
+        quest_channel_id: int | None = None,
+        referee_role_id: int | None = None,
+    ) -> None:
+        if quest_channel_id is not None:
+            self._quest_channel_id = quest_channel_id
+        if referee_role_id is not None:
+            self._referee_role_id = referee_role_id
 
     async def ingest_new_message(self, message: discord.Message) -> None:
         if not self._should_process(message):
@@ -132,6 +143,8 @@ class QuestIngestionService:
             return False
         if message.author.bot:
             return False
+        if self._quest_channel_id is None:
+            return False
         if message.channel.id != self._quest_channel_id:
             return False
         if not self._has_referee_role(message.author):
@@ -147,6 +160,8 @@ class QuestIngestionService:
         return True
 
     def _has_referee_role(self, member: discord.abc.Snowflake) -> bool:
+        if self._referee_role_id is None:
+            return True
         roles = getattr(member, "roles", [])
         for role in roles:
             if getattr(role, "id", None) == self._referee_role_id:

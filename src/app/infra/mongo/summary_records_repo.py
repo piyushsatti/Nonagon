@@ -6,8 +6,8 @@ from typing import Any, Mapping, cast
 from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
 from pymongo import ASCENDING
 
-from app.discord_bot.ingestion.links import DiscordMessageKey
-from app.discord_bot.ingestion.summaries_pipeline import (
+from app.bot.ingestion.links import DiscordMessageKey
+from app.bot.ingestion.summaries_pipeline import (
     AdventureSummaryRecord,
     document_to_record,
     record_to_document,

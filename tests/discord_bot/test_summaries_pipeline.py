@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.discord_bot.ingestion.summaries_pipeline import (
+from app.bot.ingestion.summaries_pipeline import (
     SummaryParseError,
     map_parsed_to_domain,
     map_summary_to_record,

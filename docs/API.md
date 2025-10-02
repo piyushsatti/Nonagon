@@ -16,7 +16,7 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 
 * **IDs:** Server-generated with prefixes: `USER`, `CHAR`, `QUES`, `SUMM` (e.g., `USER0001`).
 * **Time:** RFC3339 UTC strings, e.g. `"2025-09-05T23:00:00Z"`.
-* **Durations:** Expressed in minutes (`duration_min`).
+* **Durations:** Expressed in hours via integer fields like `duration_hours`.
 * **Pagination:** Offset style, `?limit=50&offset=0`.
 * **Errors:** Structured JSON Problem format:
 
@@ -35,7 +35,7 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 
 ### User
 
-**UserIn** (create/update body)
+**UserCreate** (request body)
 
 ```json
 {
@@ -63,7 +63,7 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 
 ### Character
 
-**CharacterIn** (create/update body)
+**CharacterCreate** (request body)
 
 ```json
 {
@@ -96,7 +96,7 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 
 ### Quest
 
-**QuestIn** (create/update body)
+**QuestCreate** (request body)
 
 ```json
 {
@@ -104,7 +104,7 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
   "title": "Into the Barrowmaze",
   "description": "Delve ...",
   "starting_at": "2025-09-05T23:00:00Z",
-  "duration_min": 180,
+  "duration_hours": 3,
   "image_url": "https://img/cover.png"
 }
 ```
@@ -128,7 +128,7 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 
 ### Summary
 
-**SummaryIn** (create/update body)
+**SummaryCreate** (request body)
 
 ```json
 {
@@ -142,6 +142,20 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
   "created_on": "2025-09-06T03:10:00Z",
   "players": ["USER0001"],
   "characters": ["CHAR0007"]
+}
+```
+
+**SummaryUpdate** (request body)
+
+```json
+{
+  "title": "Skulls and Silt (Revised)",
+  "description": "Expanded recap including epilogue",
+  "raw": "updated markdown ...",
+  "players": ["USER0001", "USER0004"],
+  "characters": ["CHAR0007", "CHAR0013"],
+  "linked_quests": ["QUES0012"],
+  "last_edited_at": "2025-09-08T21:45:00Z"
 }
 ```
 
@@ -219,6 +233,7 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 * `GET /v1/summaries?author_id=USER0001` — List by author
 * `GET /v1/summaries?character_id=CHAR0007` — List by character
 * `GET /v1/summaries?player_id=USER0001` — List by player
+  * (Only one filter may be applied per request; combine with `limit`/`offset` for pagination.)
 * `PATCH /v1/summaries/{summaryId}` — Update summary
 * `DELETE /v1/summaries/{summaryId}` — Delete summary
 * `POST /v1/summaries/{summaryId}:updateLastEdited` — Update last\_edited
@@ -231,10 +246,11 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 
 ## Validation Highlights
 
-* **QuestIn**: `starting_at` must be in the future; `duration_min` ≥ 15 (recommend ≥ 60).
-* **SummaryIn**: Requires non-empty `title`, `description`, `raw`; at least one `player` and one `character`.
-* **CharacterIn**: Requires `owner_id` and valid links.
-* **User**: Must respect role/profile consistency.
+* **QuestCreate**: `starting_at` must be in the future; `duration_hours` ≥ 1 is recommended.
+* **SummaryCreate**: Requires non-empty `title`, `description`, `raw`; at least one `player` and one `character`.
+* **SummaryUpdate**: Validates that `last_edited_at` is not before `created_on` and de-duplicates collection fields.
+* **CharacterCreate**: Requires `owner_id` and valid links.
+* **UserCreate/UserUpdate**: Must respect role/profile consistency.
 
 ---
 

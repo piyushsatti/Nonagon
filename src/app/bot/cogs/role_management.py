@@ -6,8 +6,8 @@ from dataclasses import dataclass
 import discord
 from discord.ext import commands
 
-from app.discord_bot.config import DiscordBotConfig
-from app.discord_bot.services.role_management import (
+from app.bot.config import DiscordBotConfig
+from app.bot.services.role_management import (
     PlayerRoleResult,
     PlayerRoleStatus,
     RefereeRoleResult,
@@ -19,6 +19,8 @@ from app.domain.models.user.UserModel import User
 
 @dataclass(slots=True)
 class DiscordRoleSync:
+    """Outcome of attempting to align a Discord role with domain expectations."""
+
     applied: bool
     message: str | None = None
     error: bool = False
@@ -33,6 +35,7 @@ class RoleManagementCog(commands.Cog):
         service: RoleManagementService,
         config: DiscordBotConfig,
     ) -> None:
+        """Store the role management service and Discord configuration."""
         self._service = service
         self._config = config
         self._log = logging.getLogger(__name__)
@@ -45,6 +48,7 @@ class RoleManagementCog(commands.Cog):
     async def player_grant(
         self, ctx: commands.Context[commands.Bot], member: discord.Member
     ) -> None:
+        """Hybrid command entrypoint for granting the player role."""
         await self._handle_player_command(ctx, member, grant=True)
 
     @commands.hybrid_command(
@@ -55,6 +59,7 @@ class RoleManagementCog(commands.Cog):
     async def player_revoke(
         self, ctx: commands.Context[commands.Bot], member: discord.Member
     ) -> None:
+        """Hybrid command entrypoint for revoking the player role."""
         await self._handle_player_command(ctx, member, grant=False)
 
     @commands.hybrid_command(
@@ -65,6 +70,7 @@ class RoleManagementCog(commands.Cog):
     async def referee_grant(
         self, ctx: commands.Context[commands.Bot], member: discord.Member
     ) -> None:
+        """Hybrid command entrypoint for granting the referee role."""
         await self._handle_referee_command(ctx, member, grant=True)
 
     @commands.hybrid_command(
@@ -75,6 +81,7 @@ class RoleManagementCog(commands.Cog):
     async def referee_revoke(
         self, ctx: commands.Context[commands.Bot], member: discord.Member
     ) -> None:
+        """Hybrid command entrypoint for revoking the referee role."""
         await self._handle_referee_command(ctx, member, grant=False)
 
     async def _handle_player_command(
@@ -84,6 +91,7 @@ class RoleManagementCog(commands.Cog):
         *,
         grant: bool,
     ) -> None:
+        """Resolve the player role command, syncing Discord state and building feedback embeds."""
         guild = ctx.guild
         if guild is None:
             await self._send_embed(
@@ -148,6 +156,7 @@ class RoleManagementCog(commands.Cog):
         *,
         grant: bool,
     ) -> None:
+        """Resolve the referee role command, ensuring both player/referee roles align with domain state."""
         guild = ctx.guild
         if guild is None:
             await self._send_embed(
@@ -223,6 +232,7 @@ class RoleManagementCog(commands.Cog):
         should_have: bool,
         reason: str,
     ) -> DiscordRoleSync:
+        """Ensure a member's Discord role matches the desired state and report the action."""
         has_role = role in member.roles
         if should_have and has_role:
             return DiscordRoleSync(applied=False, message="Role already present")
@@ -252,6 +262,7 @@ class RoleManagementCog(commands.Cog):
         member: discord.Member,
         sync: DiscordRoleSync,
     ) -> discord.Embed:
+        """Build an embed summarizing the outcome of a player-role grant."""
         if result.status is PlayerRoleStatus.PROMOTED:
             title = "Player access granted"
             description = f"{member.mention} can now create characters."
@@ -277,6 +288,7 @@ class RoleManagementCog(commands.Cog):
         member: discord.Member,
         sync: DiscordRoleSync,
     ) -> discord.Embed:
+        """Build an embed summarizing the outcome of a player-role revocation."""
         if result.status is PlayerRoleStatus.DEMOTED:
             title = "Player access revoked"
             description = f"{member.mention} has been returned to member status."
@@ -301,6 +313,7 @@ class RoleManagementCog(commands.Cog):
         actor: discord.abc.User,
         member: discord.Member,
     ) -> discord.Embed:
+        """Explain why a player revoke was blocked due to lingering referee permissions."""
         description = f"{member.mention} still has the referee role. Remove it before revoking player access."
         return self._build_embed(
             title="Player revoke blocked",
@@ -320,6 +333,7 @@ class RoleManagementCog(commands.Cog):
         sync_player: DiscordRoleSync,
         sync_referee: DiscordRoleSync,
     ) -> discord.Embed:
+        """Build an embed summarizing the outcome of a referee-role grant."""
         if result.status is RefereeRoleStatus.PROMOTED:
             title = "Referee privileges granted"
             description = f"{member.mention} can now post quests and summaries."
@@ -351,6 +365,7 @@ class RoleManagementCog(commands.Cog):
         member: discord.Member,
         sync_referee: DiscordRoleSync,
     ) -> discord.Embed:
+        """Build an embed summarizing the outcome of a referee-role revocation."""
         if result.status is RefereeRoleStatus.DEMOTED:
             title = "Referee privileges revoked"
             description = f"{member.mention} can no longer post quests or summaries."
@@ -378,6 +393,7 @@ class RoleManagementCog(commands.Cog):
         *,
         should_have: bool,
     ) -> str:
+        """Summarize how a role sync operation behaved for display in embeds."""
         if sync.error:
             return f"• {label}: ⚠️ {sync.message or 'Discord error'}"
         if sync.applied:
@@ -397,6 +413,7 @@ class RoleManagementCog(commands.Cog):
         member: discord.Member,
         discord_summary: str,
     ) -> discord.Embed:
+        """Create a standardized role management embed with domain and Discord context."""
         embed = discord.Embed(title=title, description=description, color=color)
         embed.add_field(name="User ID", value=str(domain_user.user_id), inline=False)
         roles = ", ".join(role.value for role in domain_user.roles) or "None"
@@ -407,6 +424,7 @@ class RoleManagementCog(commands.Cog):
         return embed
 
     def _error_embed(self, title: str, description: str) -> discord.Embed:
+        """Return a red embed conveying an administrative error."""
         return discord.Embed(
             title=title, description=description, color=discord.Color.red()
         )
@@ -414,10 +432,16 @@ class RoleManagementCog(commands.Cog):
     async def _send_embed(
         self, ctx: commands.Context[commands.Bot], embed: discord.Embed
     ) -> None:
+        """Send an embed to the invoking context, logging failures defensively."""
         try:
             await ctx.send(embed=embed)
         except discord.HTTPException as exc:  # pragma: no cover - defensive
             self._log.error("Failed to send embed", exc_info=exc)
 
-    def _resolve_role(self, guild: discord.Guild, role_id: int) -> discord.Role | None:
+    def _resolve_role(
+        self, guild: discord.Guild, role_id: int | None
+    ) -> discord.Role | None:
+        """Look up a configured Discord role, tolerating missing IDs."""
+        if role_id is None:
+            return None
         return guild.get_role(role_id)

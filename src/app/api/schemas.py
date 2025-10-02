@@ -1,50 +1,151 @@
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Any, Dict, Literal, Optional
+from enum import Enum
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 # --- Shared Types ---
-UserRole = Literal["MEMBER", "PLAYER", "REFEREE"]
-CharacterStatus = Literal["ACTIVE", "RETIRED"]
-QuestStatus = Literal["ANNOUNCED", "COMPLETED", "CANCELLED"]
-SummaryKind = Literal["PLAYER", "REFEREE"]
+
+
+class UserRole(str, Enum):
+    MEMBER = "MEMBER"
+    PLAYER = "PLAYER"
+    REFEREE = "REFEREE"
+
+
+class CharacterStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    INACTIVE = "INACTIVE"
+
+
+class QuestStatus(str, Enum):
+    ANNOUNCED = "ANNOUNCED"
+    SIGNUP_CLOSED = "SIGNUP_CLOSED"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+
+
+class SummaryKind(str, Enum):
+    PLAYER = "PLAYER"
+    REFEREE = "REFEREE"
+
+
+# --- Helpers ---
+
+
+def _empty_roles() -> List[UserRole]:
+    return []
+
+
+def _empty_signups() -> List[QuestSignup]:  # type: ignore[name-defined]
+    return []
+
+
+def _empty_members() -> List["GuildMemberSnapshot"]:  # type: ignore[name-defined]
+    return []
 
 
 # --- Users ---
-class UserBase(BaseModel):
+
+
+class InteractionMetrics(BaseModel):
+    occurrences: int = 0
+    total_seconds: int = 0
+    total_hours: float = 0.0
+
+
+class PlayerProfile(BaseModel):
+    characters: list[str] = Field(default_factory=list)
+    quests_applied: list[str] = Field(default_factory=list)
+    quests_played: list[str] = Field(default_factory=list)
+    summaries_written: list[str] = Field(default_factory=list)
+    joined_on: Optional[datetime] = None
+    created_first_character_on: Optional[datetime] = None
+    last_played_on: Optional[datetime] = None
+    played_with_character: Dict[str, InteractionMetrics] | None = None
+
+
+class RefereeProfile(BaseModel):
+    quests_hosted: list[str] = Field(default_factory=list)
+    summaries_written: list[str] = Field(default_factory=list)
+    first_dmed_on: Optional[datetime] = None
+    last_dmed_on: Optional[datetime] = None
+    collabed_with: Dict[str, InteractionMetrics] | None = None
+    hosted_for: Dict[str, int] | None = None
+
+
+class UserCreate(BaseModel):
     discord_id: Optional[str] = None
     dm_channel_id: Optional[str] = None
-    roles: Optional[list[UserRole]] = None
+    roles: list[UserRole] | None = None
+    joined_at: Optional[datetime] = None
+
+
+class UserUpdate(BaseModel):
+    discord_id: Optional[str] = None
+    dm_channel_id: Optional[str] = None
     joined_at: Optional[datetime] = None
     last_active_at: Optional[datetime] = None
+    roles: list[UserRole] | None = None
 
 
-class UserIn(UserBase):
-    pass
-
-
-class User(UserBase):
+class User(BaseModel):
     user_id: str
+    discord_id: Optional[str] = None
+    dm_channel_id: Optional[str] = None
+    roles: List[UserRole] = Field(default_factory=_empty_roles)
+    joined_at: Optional[datetime] = None
+    last_active_at: Optional[datetime] = None
     is_member: bool = False
     is_player: bool = False
     is_referee: bool = False
-    message_count_total: Optional[int] = None
-    reactions_given: Optional[int] = None
-    reactions_received: Optional[int] = None
-    voice_time_total_spent: Optional[float] = None  # hours
-
-    player: Optional[Dict[str, Any]] = None
-    referee: Optional[Dict[str, Any]] = None
+    messages_count_total: int = 0
+    reactions_given: int = 0
+    reactions_received: int = 0
+    voice_total_hours: float = 0.0
+    player: Optional[PlayerProfile] = None
+    referee: Optional[RefereeProfile] = None
 
 
 class ActivityPing(BaseModel):
     active_at: Optional[datetime] = None
 
 
+class SyncStats(BaseModel):
+    processed: int
+    created: int
+
+
+class GuildMemberSnapshot(BaseModel):
+    discord_id: str
+    joined_at: Optional[datetime] = None
+    is_bot: bool = False
+
+
+class GuildSyncRequest(BaseModel):
+    guild_id: str
+    members: List[GuildMemberSnapshot] = Field(default_factory=_empty_members)
+
+
 # --- Characters ---
-class CharacterIn(BaseModel):
-    character_id: str
-    owner_id: Optional[str] = None
+
+
+class CharacterCreate(BaseModel):
+    owner_id: str
+    name: str
+    ddb_link: str
+    character_thread_link: str
+    token_link: str
+    art_link: str
+    description: Optional[str] = None
+    notes: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+
+
+class CharacterUpdate(BaseModel):
     name: Optional[str] = None
     ddb_link: Optional[str] = None
     character_thread_link: Optional[str] = None
@@ -52,11 +153,24 @@ class CharacterIn(BaseModel):
     art_link: Optional[str] = None
     description: Optional[str] = None
     notes: Optional[str] = None
+    status: Optional[CharacterStatus] = None
+    tags: Optional[list[str]] = None
+    created_at: Optional[datetime] = None
+    last_played_at: Optional[datetime] = None
+
+
+class Character(BaseModel):
+    character_id: str
+    owner_id: str
+    name: str
+    ddb_link: str
+    character_thread_link: str
+    token_link: str
+    art_link: str
+    description: str
+    notes: str
     tags: list[str] = Field(default_factory=list)
-
-
-class Character(CharacterIn):
-    status: CharacterStatus = "ACTIVE"
+    status: CharacterStatus = CharacterStatus.ACTIVE
     created_at: datetime
     last_played_at: Optional[datetime] = None
     quests_played: int = 0
@@ -67,45 +181,96 @@ class Character(CharacterIn):
 
 
 # --- Quests ---
-class QuestIn(BaseModel):
-    quest_id: Optional[str] = None
-    referee_id: Optional[str] = None
+
+
+class QuestCreate(BaseModel):
+    referee_id: str
+    channel_id: str
+    message_id: str
     raw: Optional[str] = None
     title: Optional[str] = None
     description: Optional[str] = None
     starting_at: Optional[datetime] = None
     duration_hours: Optional[int] = None
     image_url: Optional[str] = None
-    linked_quests: Optional[list[str]] = None
-    linked_summaries: Optional[list[str]] = None
 
 
-class Quest(QuestIn):
-    channel_id: Optional[str] = None
-    message_id: Optional[str] = None
-    status: QuestStatus = "ANNOUNCED"
+class QuestUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    starting_at: Optional[datetime] = None
+    duration_hours: Optional[int] = None
+    image_url: Optional[str] = None
+    status: Optional[QuestStatus] = None
+
+
+class QuestSignup(BaseModel):
+    user_id: str
+    character_id: str
+    selected: bool = False
+
+
+class Quest(BaseModel):
+    quest_id: str
+    referee_id: str
+    channel_id: str
+    message_id: str
+    raw: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    starting_at: Optional[datetime] = None
+    duration_hours: Optional[int] = None
+    image_url: Optional[str] = None
+    status: QuestStatus = QuestStatus.ANNOUNCED
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
     signups_open: bool = True
-    signups: list[Dict[str, Any]] | None = None
-
-
-# --- Summaries ---
-class SummaryIn(BaseModel):
-    summary_id: str
-    character_id: Optional[str] = None
-    quest_id: Optional[str] = None
-    raw: Optional[str] = None
-    title: Optional[str] = None
-    descroption: Optional[str] = None
-    players: Optional[list[str]] = None
-    characters: Optional[list[str]] = None
+    signups: List[QuestSignup] = Field(default_factory=_empty_signups)
     linked_quests: list[str] = Field(default_factory=list)
     linked_summaries: list[str] = Field(default_factory=list)
 
 
-class Summary(SummaryIn):
-    kind: Optional[SummaryKind] = None
-    author_id: Optional[str] = None
+# --- Summaries ---
+
+
+class SummaryCreate(BaseModel):
+    kind: SummaryKind
+    author_id: str
+    character_id: str
+    quest_id: str
+    raw: str
+    title: str
+    description: str
     created_on: Optional[datetime] = None
+    players: list[str] = Field(default_factory=list)
+    characters: list[str] = Field(default_factory=list)
+    linked_quests: list[str] = Field(default_factory=list)
+    linked_summaries: list[str] = Field(default_factory=list)
+
+
+class SummaryUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    raw: Optional[str] = None
+    players: Optional[list[str]] = None
+    characters: Optional[list[str]] = None
+    linked_quests: Optional[list[str]] = None
+    linked_summaries: Optional[list[str]] = None
     last_edited_at: Optional[datetime] = None
+
+
+class Summary(BaseModel):
+    summary_id: str
+    kind: SummaryKind
+    author_id: str
+    character_id: str
+    quest_id: str
+    title: str
+    description: str
+    raw: str
+    created_on: datetime
+    last_edited_at: Optional[datetime] = None
+    players: list[str] = Field(default_factory=list)
+    characters: list[str] = Field(default_factory=list)
+    linked_quests: list[str] = Field(default_factory=list)
+    linked_summaries: list[str] = Field(default_factory=list)

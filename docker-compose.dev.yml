@@ -37,6 +37,11 @@ services:
       MONGODB_URI: mongodb://root:example@mongo:27017/?authSource=admin
       DB_NAME: nonagon
       DISCORD_TOKEN: ${DISCORD_TOKEN:-replace_me_in_.env}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
+      QUEST_CHANNEL_ID: ${QUEST_CHANNEL_ID:-}
+      SUMMARY_CHANNEL_ID: ${SUMMARY_CHANNEL_ID:-}
+      PLAYER_ROLE_ID: ${PLAYER_ROLE_ID:-}
+      REFEREE_ROLE_ID: ${REFEREE_ROLE_ID:-}
     depends_on:
       mongo: { condition: service_healthy }
     volumes:

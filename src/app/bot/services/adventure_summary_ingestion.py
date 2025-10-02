@@ -31,8 +31,8 @@ class AdventureSummaryIngestionService:
         *,
         repo: "SummaryRecordsRepository",
         id_service: "IdService",
-        summary_channel_id: int,
-        referee_role_id: int,
+        summary_channel_id: int | None,
+        referee_role_id: int | None,
         logger: logging.Logger | None = None,
     ) -> None:
         self._repo = repo
@@ -40,6 +40,17 @@ class AdventureSummaryIngestionService:
         self._summary_channel_id = summary_channel_id
         self._referee_role_id = referee_role_id
         self._log = logger or logging.getLogger(__name__)
+
+    def update_configuration(
+        self,
+        *,
+        summary_channel_id: int | None = None,
+        referee_role_id: int | None = None,
+    ) -> None:
+        if summary_channel_id is not None:
+            self._summary_channel_id = summary_channel_id
+        if referee_role_id is not None:
+            self._referee_role_id = referee_role_id
 
     async def ingest_new_message(self, message: discord.Message) -> None:
         if not self._should_process(message):
@@ -159,6 +170,8 @@ class AdventureSummaryIngestionService:
             return False
         if message.author.bot:
             return False
+        if self._summary_channel_id is None:
+            return False
         if message.channel.id != self._summary_channel_id:
             return False
         return True
@@ -169,6 +182,8 @@ class AdventureSummaryIngestionService:
         return SummaryKind.PLAYER
 
     def _has_referee_role(self, member: discord.abc.Snowflake) -> bool:
+        if self._referee_role_id is None:
+            return True
         roles = getattr(member, "roles", [])
         for role in roles:
             if getattr(role, "id", None) == self._referee_role_id:

@@ -8,20 +8,20 @@ from typing import cast
 import discord
 import pytest
 
-from app.discord_bot.cogs.character_commands import CharacterCommandsCog
-from app.discord_bot.config import DiscordBotConfig
-from app.discord_bot.services.character_creation import (
+from app.bot.cogs.character_commands import CharacterCommandsCog
+from app.bot.config import DiscordBotConfig
+from app.bot.services.character_creation import (
     CharacterCreatePayload,
     CharacterCreationResult,
     CharacterCreationService,
     PlayerRoleRequiredError,
 )
-from app.discord_bot.services.role_management import (
+from app.bot.services.role_management import (
     PlayerRoleStatus,
     RefereeRoleStatus,
     RoleManagementService,
 )
-from app.discord_bot.services.user_provisioning import (
+from app.bot.services.user_provisioning import (
     SyncStats,
     UserProvisioningService,
 )

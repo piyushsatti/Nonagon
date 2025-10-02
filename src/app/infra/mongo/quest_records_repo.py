@@ -6,7 +6,7 @@ from typing import Any, AsyncIterator, cast
 from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
 from pymongo import ASCENDING
 
-from app.discord_bot.ingestion import (
+from app.bot.ingestion import (
     DiscordMessageKey,
     QuestRecord,
     document_to_record,

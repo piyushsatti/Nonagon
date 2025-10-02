@@ -6,8 +6,8 @@ from typing import Optional
 import discord
 from discord.ext import commands
 
-from app.discord_bot.config import DiscordBotConfig
-from app.discord_bot.services.character_creation import (
+from app.bot.config import DiscordBotConfig
+from app.bot.services.character_creation import (
     CharacterCreatePayload,
     CharacterCreationResult,
     CharacterCreationService,
@@ -24,6 +24,7 @@ class CharacterCommandsCog(commands.Cog):
         service: CharacterCreationService,
         config: DiscordBotConfig,
     ) -> None:
+        """Store dependencies for creating characters through Discord commands."""
         self._service = service
         self._config = config
         self._log = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ class CharacterCommandsCog(commands.Cog):
         notes: Optional[str] = None,
         tags: Optional[str] = None,
     ) -> None:
+        """Create a character for the invoking member and respond with an embed summarizing the result."""
         guild = ctx.guild
         if guild is None:
             await self._send_embed(
@@ -84,7 +86,10 @@ class CharacterCommandsCog(commands.Cog):
             await self._maybe_defer(ctx)
             result = await self._service.create_for_member(author, payload)
         except PlayerRoleRequiredError:
-            role = guild.get_role(self._config.player_role_id)
+            player_role_id = self._config.player_role_id
+            role = (
+                guild.get_role(player_role_id) if player_role_id is not None else None
+            )
             role_hint = f" ({role.mention})" if role else ""
             embed = self._error_embed(
                 "Player role required",
@@ -109,6 +114,7 @@ class CharacterCommandsCog(commands.Cog):
         await self._send_embed(ctx, embed)
 
     async def _maybe_defer(self, ctx: commands.Context[commands.Bot]) -> None:
+        """Defer the interaction backing a command, preserving support for prefix usage."""
         interaction = getattr(ctx, "interaction", None)
         if interaction is None:
             return
@@ -117,12 +123,14 @@ class CharacterCommandsCog(commands.Cog):
         await ctx.defer()
 
     def _parse_tags(self, tags: Optional[str]) -> list[str]:
+        """Split a comma-delimited tag string into a normalized list."""
         if not tags:
             return []
         parts = [part.strip() for part in tags.split(",")]
         return [part for part in parts if part]
 
     def _clean_optional(self, value: Optional[str]) -> Optional[str]:
+        """Strip optional string inputs, returning None when only whitespace is provided."""
         if value is None:
             return None
         cleaned = value.strip()
@@ -133,6 +141,7 @@ class CharacterCommandsCog(commands.Cog):
         result: CharacterCreationResult,
         member: discord.Member,
     ) -> discord.Embed:
+        """Produce a success embed describing the newly created character."""
         character = result.character
         user = result.user
 
@@ -181,6 +190,7 @@ class CharacterCommandsCog(commands.Cog):
         return embed
 
     def _error_embed(self, title: str, description: str) -> discord.Embed:
+        """Return a red embed conveying character command errors."""
         return discord.Embed(
             title=title, description=description, color=discord.Color.red()
         )
@@ -188,6 +198,7 @@ class CharacterCommandsCog(commands.Cog):
     async def _send_embed(
         self, ctx: commands.Context[commands.Bot], embed: discord.Embed
     ) -> None:
+        """Send an embed response while logging Discord delivery failures."""
         try:
             await ctx.send(embed=embed)
         except discord.HTTPException as exc:  # pragma: no cover - defensive

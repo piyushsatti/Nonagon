@@ -10,26 +10,29 @@ Nonagon automates quest workflows (announce >> sign‑ups >> roster selection >>
 
 ## 2. Architecture Overview
 
-**Style:** Hexagonal (Ports & Adapters) with a thin MVC at the edge.
+**Style:** Hexagonal (Ports & Adapters) with thin delivery edges (Discord + FastAPI).
 
-* **Delivery (Controllers/Views):** Discord Cogs handle commands & events (controllers). UI is built with `discord.ui.View` (buttons/selects/modals) and presenters that render embeds.
-* **Application Layer (Use Cases):** Stateless orchestrators (e.g., `CreateQuest`, `ApplyForQuest`, `SelectRoster`, `SubmitSummary`) that coordinate domain models and repositories.
+* **Delivery (Controllers/Views):**
+  * Discord Cogs handle commands & events. UI is built with `discord.ui.View` (buttons/selects/modals) and presenters that render embeds.
+  * FastAPI routers expose the same use cases over HTTP for automation and external tooling.
+* **Application Layer (Use Cases):** Stateless orchestrators (e.g., `CreateQuest`, `ListSummaries`, `SelectRoster`, `SubmitSummary`) that coordinate domain models and repositories.
 * **Domain Layer (Models):** Pure Python dataclasses modeling `User` (+ roles & profiles), `Quest`, and `QuestSummary`. Contains invariants and state transitions.
-* **Adapters (Infra):** Repositories for MongoDB, configuration, and integrations (Discord message IDs linkage). Optional background jobs for projections/analytics.
+* **Adapters (Infra):** MongoDB repositories (async via Motor), configuration, and integrations (Discord message IDs linkage). Optional background jobs for projections/analytics.
 
-```
-[ Discord (slash cmds, buttons) ]
-           |
-        Controllers (Cogs)  ←→  Views (discord.ui.View + presenters)
-           |
-        Application (Use Cases)  ←→  Ports (Repo interfaces)
-           |
-          Domain (Entities/Value Objects)
-           |
-        Adapters (MongoDB repos, schedulers, config)
+```text
+[ Discord (slash cmds, buttons) ]      [ FastAPI HTTP API ]
+            |                             |
+      Controllers (Cogs)           Async Routers (FastAPI)
+            \___________________________/
+                    |
+           Application (Use Cases)  ←→  Ports (Repo interfaces)
+                    |
+              Domain (Entities/Value Objects)
+                    |
+            Adapters (MongoDB repos, schedulers, config)
 ```
 
-**Why this shape**
+### Why this shape
 
 * Domain rules remain framework‑agnostic.
 * UI/Discord specifics live at the edge and can change without touching core logic.
@@ -50,16 +53,23 @@ Nonagon automates quest workflows (announce >> sign‑ups >> roster selection >>
 * One file per action; no framework imports. Examples:
 
   * `create_quest`, `announce_quest`, `apply_for_quest`, `select_roster`, `mark_completed`
-  * `submit_summary` (DM or player)
+  * `submit_summary` (DM or player), `list_summaries`
   * `record_message_activity`, `record_event_attendance`
 
 ### 3.3 Domain (Models)
 
 * **User** with `roles[]` and optional `player`/`referee` profiles.
 * **Quest** with lifecycle (`DRAFT → SIGNUP_OPEN → ROSTER_SELECTED → RUNNING → COMPLETED/CANCELLED`), sign‑ups, roster, waitlist, Discord linkage, telemetry.
-* **QuestSummary** unified with discriminator `kind = player|dm`, visibility policy.
+* **QuestSummary** unified with discriminator `kind = player|dm`, visibility policy, and indexed `players[]`/`characters[]` collections for filter-based queries.
 
-### 3.4 Adapters (Infra)
+### 3.4 HTTP API Gateway
+
+* FastAPI hosts `/v1/**` endpoints that wrap the same use cases consumed by Discord controllers.
+* Dependency wiring (`app/api/deps.py`) shares singleton Mongo repositories and ID services across requests.
+* Routers are fully async, returning Pydantic response models (`Quest`, `Summary`, etc.) and surfacing domain errors as HTTP 4xx.
+* Summary endpoints now include a dedicated `ListSummaries` use case that supports author/character/player filters with consistent pagination semantics.
+
+### 3.5 Adapters (Infra)
 
 * **MongoDB repositories:** implement ports for `UsersRepo`, `QuestsRepo`, `SummariesRepo`.
 * **Config:** environment‑driven (`.env` in dev); no secrets in code.
@@ -102,7 +112,7 @@ Nonagon automates quest workflows (announce >> sign‑ups >> roster selection >>
 * **Quest**
 
   * Identity, meta (`name`, `description`, `tags`, `category`, `region`)
-  * Scheduling (`scheduled_at`, `duration_minutes`, `timezone`)
+  * Scheduling (`scheduled_at`, `duration_hours`, `timezone`)
   * Capacity (`max_players`, `min_players`, optional level range)
   * Discord linkage (`guild_id`, `channel_id`, `signup_message_id`, `thread_id`)
   * Lifecycle timestamps; `signups`, `roster`, `waitlist`
@@ -117,6 +127,7 @@ Nonagon automates quest workflows (announce >> sign‑ups >> roster selection >>
 
 * Prefer **IDs** over object references in maps to avoid cycles; easy serialization.
 * Embed small, tightly‑coupled subdocs (profiles, sign‑ups). Split to collections when they grow or need independent indexing/lifecycle.
+* Persist entity IDs as `{prefix, number}` pairs so Mongo can index both the human-readable form and the sortable numeric component (used by summary listing filters).
 
 ---
 
@@ -134,6 +145,7 @@ Nonagon automates quest workflows (announce >> sign‑ups >> roster selection >>
 * **Rate limits:** centralize message edits with automatic retry/backoff; deduplicate identical edits; prefer bulk updates.
 * **Idempotency:** use deterministic keys (e.g., signup composite `(quest_id, user_id, character_id)`) to prevent double‑apply.
 * **Pagination & caching:** paginate lists (quests, summaries); cache stable lookups (e.g., user profiles) in memory with TTL.
+* **HTTP throughput:** FastAPI handlers are fully async and share a single Motor client; keep responses bounded with `limit`/`offset` and stream long-running work to background tasks when needed.
 
 ---
 
@@ -174,7 +186,7 @@ Nonagon automates quest workflows (announce >> sign‑ups >> roster selection >>
 
 * MongoDB Atlas is the primary store; scale via indexes and capped document sizes.
 * Single bot shard initially; can shard later if guild count grows.
-* Discord UI is the only delivery mechanism for now (no public HTTP API).
+* Delivery edges are Discord UI and the FastAPI HTTP service; both exercise the same use cases.
 
 ---
 
@@ -192,6 +204,11 @@ class QuestsRepo(Protocol):
 class SummariesRepo(Protocol):
     async def get(self, summary_id: str) -> QuestSummary: ...
     async def upsert(self, summary: QuestSummary) -> None: ...
+  async def delete(self, summary_id: str) -> None: ...
+  async def list(self, *, limit: int, offset: int) -> list[QuestSummary]: ...
+  async def list_by_author(self, author_id: str, *, limit: int, offset: int) -> list[QuestSummary]: ...
+  async def list_by_character(self, character_id: str, *, limit: int, offset: int) -> list[QuestSummary]: ...
+  async def list_by_player(self, player_id: str, *, limit: int, offset: int) -> list[QuestSummary]: ...
 ```
 
 ---

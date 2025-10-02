@@ -12,11 +12,13 @@ class UserProvisioningCog(commands.Cog):
     """Ensures Discord guild members are synchronised with domain users."""
 
     def __init__(self, *, service: UserProvisioningService) -> None:
+        """Persist the provisioning service used to mirror guild members."""
         self._service = service
         self._log = logging.getLogger(__name__)
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
+        """Synchronise known guilds once the bot is ready."""
         bot = getattr(self, "bot", None)
         if bot is None:
             return
@@ -36,12 +38,14 @@ class UserProvisioningCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
+        """Provision a domain user when a real member joins the guild."""
         if member.bot:
             return
         await self._service.ensure_member_user(member)
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild) -> None:
+        """Sync every member when the bot is added to a new guild."""
         stats = await self._sync_guild(guild)
         if stats.created:
             self._log.info(
@@ -54,6 +58,7 @@ class UserProvisioningCog(commands.Cog):
             )
 
     async def _sync_guild(self, guild: discord.Guild) -> SyncStats:
+        """Return provisioning stats after reconciling guild membership."""
         available = getattr(guild, "available", True)
         if not available:
             return SyncStats(processed=0, created=0)

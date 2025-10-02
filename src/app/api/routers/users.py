@@ -4,9 +4,7 @@ from fastapi import APIRouter, HTTPException
 
 import app.api.deps as deps
 from app.api.mappers import user_to_api
-from app.api.schemas import ActivityPing
-from app.api.schemas import User as APIUser
-from app.api.schemas import UserIn as APIUserIn
+from app.api.schemas import ActivityPing, User, UserCreate, UserUpdate
 from app.domain.usecase import users as user_usecases
 
 router = APIRouter(prefix="/v1/users", tags=["Users"])
@@ -21,12 +19,12 @@ async def users_healthz() -> dict[str, bool]:
 
 @router.post(
     "",
-    response_model=APIUser,
+    response_model=User,
     status_code=201,
     response_model_exclude_none=True,
 )
-async def create_user(body: APIUserIn | None = None) -> APIUser:
-    payload = body or APIUserIn()
+async def create_user(body: UserCreate | None = None) -> User:
+    payload = body or UserCreate()
 
     try:
         usecase = user_usecases.RegisterUser(users_repo=users_repo)
@@ -41,8 +39,8 @@ async def create_user(body: APIUserIn | None = None) -> APIUser:
         raise HTTPException(status_code=400, detail=str(err)) from err
 
 
-@router.get("/{user_id}", response_model=APIUser, response_model_exclude_none=True)
-async def get_user(user_id: str) -> APIUser:
+@router.get("/{user_id}", response_model=User, response_model_exclude_none=True)
+async def get_user(user_id: str) -> User:
     try:
         usecase = user_usecases.GetUser(users_repo=users_repo)
         user = await usecase.execute(user_id)
@@ -53,10 +51,10 @@ async def get_user(user_id: str) -> APIUser:
 
 @router.get(
     "/by-discord/{discord_id}",
-    response_model=APIUser,
+    response_model=User,
     response_model_exclude_none=True,
 )
-async def get_user_by_discord(discord_id: str) -> APIUser:
+async def get_user_by_discord(discord_id: str) -> User:
     try:
         usecase = user_usecases.GetUserByDiscord(users_repo=users_repo)
         user = await usecase.execute(discord_id)
@@ -65,8 +63,8 @@ async def get_user_by_discord(discord_id: str) -> APIUser:
         raise HTTPException(status_code=404, detail=str(err)) from err
 
 
-@router.patch("/{user_id}", response_model=APIUser, response_model_exclude_none=True)
-async def patch_user(user_id: str, body: APIUserIn | None = None) -> APIUser:
+@router.patch("/{user_id}", response_model=User, response_model_exclude_none=True)
+async def patch_user(user_id: str, body: UserUpdate | None = None) -> User:
     payload = body.model_dump(exclude_unset=True) if body else {}
 
     try:
@@ -93,8 +91,8 @@ async def delete_user(user_id: str) -> None:
 
 
 # ---- Role commands ----
-@router.post("/{user_id}:enablePlayer", response_model=APIUser)
-async def enable_player(user_id: str) -> APIUser:
+@router.post("/{user_id}:enablePlayer", response_model=User)
+async def enable_player(user_id: str) -> User:
     try:
         usecase = user_usecases.PromoteUserToPlayer(users_repo=users_repo)
         user = await usecase.execute(user_id)
@@ -105,10 +103,10 @@ async def enable_player(user_id: str) -> APIUser:
 
 @router.post(
     "/{user_id}:disablePlayer",
-    response_model=APIUser,
+    response_model=User,
     response_model_exclude_none=True,
 )
-async def disable_player(user_id: str) -> APIUser:
+async def disable_player(user_id: str) -> User:
     try:
         usecase = user_usecases.DemotePlayerToMember(users_repo=users_repo)
         user = await usecase.execute(user_id)
@@ -117,8 +115,8 @@ async def disable_player(user_id: str) -> APIUser:
         raise HTTPException(status_code=400, detail=str(err)) from err
 
 
-@router.post("/{user_id}:enableReferee", response_model=APIUser)
-async def enable_referee(user_id: str) -> APIUser:
+@router.post("/{user_id}:enableReferee", response_model=User)
+async def enable_referee(user_id: str) -> User:
     try:
         usecase = user_usecases.PromotePlayerToReferee(users_repo=users_repo)
         user = await usecase.execute(user_id)
@@ -127,8 +125,8 @@ async def enable_referee(user_id: str) -> APIUser:
         raise HTTPException(status_code=400, detail=str(err)) from err
 
 
-@router.post("/{user_id}:disableReferee", response_model=APIUser)
-async def disable_referee(user_id: str) -> APIUser:
+@router.post("/{user_id}:disableReferee", response_model=User)
+async def disable_referee(user_id: str) -> User:
     try:
         usecase = user_usecases.RevokeRefereeRole(users_repo=users_repo)
         user = await usecase.execute(user_id)
@@ -140,10 +138,10 @@ async def disable_referee(user_id: str) -> APIUser:
 # ---- Linking characters ----
 @router.post(
     "/{user_id}/characters/{character_id}:link",
-    response_model=APIUser,
+    response_model=User,
     response_model_exclude_none=True,
 )
-async def link_character(user_id: str, character_id: str) -> APIUser:
+async def link_character(user_id: str, character_id: str) -> User:
     try:
         usecase = user_usecases.LinkCharacterToUser(
             users_repo=users_repo,
@@ -157,10 +155,10 @@ async def link_character(user_id: str, character_id: str) -> APIUser:
 
 @router.post(
     "/{user_id}/characters/{character_id}:unlink",
-    response_model=APIUser,
+    response_model=User,
     response_model_exclude_none=True,
 )
-async def unlink_character(user_id: str, character_id: str) -> APIUser:
+async def unlink_character(user_id: str, character_id: str) -> User:
     try:
         usecase = user_usecases.UnlinkCharacterFromUser(
             users_repo=users_repo,
@@ -173,8 +171,8 @@ async def unlink_character(user_id: str, character_id: str) -> APIUser:
 
 
 # ---- Telemetry ----
-@router.post("/{user_id}:updateLastActive", response_model=APIUser)
-async def update_last_active(user_id: str, body: ActivityPing | None = None) -> APIUser:
+@router.post("/{user_id}:updateLastActive", response_model=User)
+async def update_last_active(user_id: str, body: ActivityPing | None = None) -> User:
     payload = body or ActivityPing()
 
     try:
@@ -185,10 +183,10 @@ async def update_last_active(user_id: str, body: ActivityPing | None = None) -> 
         raise HTTPException(status_code=400, detail=str(err)) from err
 
 
-@router.post("/{user_id}:updatePlayerLastActive", response_model=APIUser)
+@router.post("/{user_id}:updatePlayerLastActive", response_model=User)
 async def update_player_last_active(
     user_id: str, body: ActivityPing | None = None
-) -> APIUser:
+) -> User:
     payload = body or ActivityPing()
 
     try:
@@ -199,10 +197,10 @@ async def update_player_last_active(
         raise HTTPException(status_code=400, detail=str(err)) from err
 
 
-@router.post("/{user_id}:updateRefereeLastActive", response_model=APIUser)
+@router.post("/{user_id}:updateRefereeLastActive", response_model=User)
 async def update_referee_last_active(
     user_id: str, body: ActivityPing | None = None
-) -> APIUser:
+) -> User:
     payload = body or ActivityPing()
 
     try:
