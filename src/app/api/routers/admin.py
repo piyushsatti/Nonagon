@@ -1,3 +1,5 @@
+"""Admin endpoints for coordinating guild-level synchronization tasks."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -20,6 +22,7 @@ async def sync_guild_members(
         deps.get_user_provisioning_service
     ),
 ) -> SyncStats:
+    """Trigger a bulk synchronization between Discord guild membership and the persisted user store."""
     try:
         stats = await provisioning_service.sync_members_payload(
             guild_id=payload.guild_id,

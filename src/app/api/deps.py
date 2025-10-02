@@ -1,3 +1,5 @@
+"""Shared dependency providers for FastAPI routers."""
+
 from __future__ import annotations
 
 import os
@@ -32,6 +34,7 @@ ADMIN_TOKEN: Optional[str] = os.getenv("API_ADMIN_TOKEN")
 async def require_admin(
     x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
 ) -> None:
+    """Enforce that an admin token header is present and matches the configured secret."""
     token = ADMIN_TOKEN
     if token is None:
         raise HTTPException(
@@ -51,4 +54,5 @@ async def require_admin(
 
 
 async def get_user_provisioning_service() -> UserProvisioningService:
+    """Expose the singleton user provisioning service for dependency injection."""
     return user_provisioning_service

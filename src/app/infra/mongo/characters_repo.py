@@ -10,7 +10,7 @@ from app.domain.models.character.CharacterModel import Character
 from app.domain.models.EntityIDModel import CharacterID
 from app.domain.usecase.ports import CharactersRepo
 from app.infra.db import next_id
-from app.infra.mongo.mappers import dataclass_to_mongo, mongo_to_dataclass
+from app.infra.serialization import from_bson, to_bson
 
 
 class CharactersRepoMongo(CharactersRepo):
@@ -19,22 +19,17 @@ class CharactersRepoMongo(CharactersRepo):
 
     async def ensure_indexes(self) -> None:
         await self._collection.create_index(
-            [("_id", ASCENDING)],
-            unique=True,
-            name="uq_characters_id",
-        )
-        await self._collection.create_index(
             [("owner_id.number", ASCENDING)],
             name="ix_characters_owner_id",
         )
 
     async def get(self, character_id: str) -> Optional[Character]:
         doc = await self._collection.find_one({"_id": character_id})
-        return mongo_to_dataclass(Character, doc) if doc else None
+        return from_bson(Character, doc) if doc else None
 
     async def upsert(self, character: Character) -> bool:
-        doc = dataclass_to_mongo(character)
-        doc.setdefault("_id", doc.get("character_id"))
+        doc = to_bson(character)
+        doc["_id"] = doc.get("character_id")
         await self._collection.replace_one({"_id": doc["_id"]}, doc, upsert=True)
         return True
 

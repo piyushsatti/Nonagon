@@ -1,3 +1,5 @@
+"""FastAPI routes for managing Nonagon users and their related state."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
@@ -14,6 +16,7 @@ chars_repo = deps.chars_repo
 
 @router.get("/healthz")
 async def users_healthz() -> dict[str, bool]:
+    """Return a static healthy response so external systems can probe the API."""
     return {"ok": True}
 
 
@@ -24,6 +27,7 @@ async def users_healthz() -> dict[str, bool]:
     response_model_exclude_none=True,
 )
 async def create_user(body: UserCreate | None = None) -> User:
+    """Register a new user or ensure one exists using optional Discord metadata."""
     payload = body or UserCreate()
 
     try:
@@ -41,6 +45,7 @@ async def create_user(body: UserCreate | None = None) -> User:
 
 @router.get("/{user_id}", response_model=User, response_model_exclude_none=True)
 async def get_user(user_id: str) -> User:
+    """Fetch a user by canonical Nonagon user identifier."""
     try:
         usecase = user_usecases.GetUser(users_repo=users_repo)
         user = await usecase.execute(user_id)
@@ -55,6 +60,7 @@ async def get_user(user_id: str) -> User:
     response_model_exclude_none=True,
 )
 async def get_user_by_discord(discord_id: str) -> User:
+    """Look up a user by their Discord snowflake identifier."""
     try:
         usecase = user_usecases.GetUserByDiscord(users_repo=users_repo)
         user = await usecase.execute(discord_id)
@@ -65,6 +71,7 @@ async def get_user_by_discord(discord_id: str) -> User:
 
 @router.patch("/{user_id}", response_model=User, response_model_exclude_none=True)
 async def patch_user(user_id: str, body: UserUpdate | None = None) -> User:
+    """Partially update a user's contact or lifecycle metadata."""
     payload = body.model_dump(exclude_unset=True) if body else {}
 
     try:
@@ -83,6 +90,7 @@ async def patch_user(user_id: str, body: UserUpdate | None = None) -> User:
 
 @router.delete("/{user_id}", status_code=204)
 async def delete_user(user_id: str) -> None:
+    """Remove a user record when it is no longer needed."""
     try:
         usecase = user_usecases.DeleteUser(users_repo=users_repo)
         await usecase.execute(user_id)
@@ -93,6 +101,7 @@ async def delete_user(user_id: str) -> None:
 # ---- Role commands ----
 @router.post("/{user_id}:enablePlayer", response_model=User)
 async def enable_player(user_id: str) -> User:
+    """Grant the player role to a user by toggling their domain profile."""
     try:
         usecase = user_usecases.PromoteUserToPlayer(users_repo=users_repo)
         user = await usecase.execute(user_id)
@@ -107,6 +116,7 @@ async def enable_player(user_id: str) -> User:
     response_model_exclude_none=True,
 )
 async def disable_player(user_id: str) -> User:
+    """Revoke the player role for a user while keeping their base membership."""
     try:
         usecase = user_usecases.DemotePlayerToMember(users_repo=users_repo)
         user = await usecase.execute(user_id)
@@ -117,6 +127,7 @@ async def disable_player(user_id: str) -> User:
 
 @router.post("/{user_id}:enableReferee", response_model=User)
 async def enable_referee(user_id: str) -> User:
+    """Promote a player to referee so they can post quests and summaries."""
     try:
         usecase = user_usecases.PromotePlayerToReferee(users_repo=users_repo)
         user = await usecase.execute(user_id)
@@ -127,6 +138,7 @@ async def enable_referee(user_id: str) -> User:
 
 @router.post("/{user_id}:disableReferee", response_model=User)
 async def disable_referee(user_id: str) -> User:
+    """Revoke referee capabilities while keeping the user's player role intact."""
     try:
         usecase = user_usecases.RevokeRefereeRole(users_repo=users_repo)
         user = await usecase.execute(user_id)
@@ -142,6 +154,7 @@ async def disable_referee(user_id: str) -> User:
     response_model_exclude_none=True,
 )
 async def link_character(user_id: str, character_id: str) -> User:
+    """Associate a character record with the specified user."""
     try:
         usecase = user_usecases.LinkCharacterToUser(
             users_repo=users_repo,
@@ -159,6 +172,7 @@ async def link_character(user_id: str, character_id: str) -> User:
     response_model_exclude_none=True,
 )
 async def unlink_character(user_id: str, character_id: str) -> User:
+    """Detach a character from the user, preventing it from showing in their roster."""
     try:
         usecase = user_usecases.UnlinkCharacterFromUser(
             users_repo=users_repo,
@@ -173,6 +187,7 @@ async def unlink_character(user_id: str, character_id: str) -> User:
 # ---- Telemetry ----
 @router.post("/{user_id}:updateLastActive", response_model=User)
 async def update_last_active(user_id: str, body: ActivityPing | None = None) -> User:
+    """Record a generic last-active timestamp for any user role."""
     payload = body or ActivityPing()
 
     try:
@@ -187,6 +202,7 @@ async def update_last_active(user_id: str, body: ActivityPing | None = None) -> 
 async def update_player_last_active(
     user_id: str, body: ActivityPing | None = None
 ) -> User:
+    """Capture player-specific activity, leaving other roles untouched."""
     payload = body or ActivityPing()
 
     try:
@@ -201,6 +217,7 @@ async def update_player_last_active(
 async def update_referee_last_active(
     user_id: str, body: ActivityPing | None = None
 ) -> User:
+    """Record the latest activity time for a referee role."""
     payload = body or ActivityPing()
 
     try:

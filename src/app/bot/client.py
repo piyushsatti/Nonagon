@@ -66,23 +66,39 @@ class IngestionBot(commands.Bot):
         await self.add_cog(
             RoleManagementCog(service=self._role_service, config=self._config)
         )
-
+        # Ensure guild settings exist before syncing commands.
+        # This is necessary because syncing application commands may rely on guild-specific configuration,
+        # and missing settings could cause errors or incomplete command registration.
         if self._config.guild_id is not None:
-            await self._settings_service.ensure_settings(self._config.guild_id)
+            try:
+                await self._settings_service.ensure_settings(self._config.guild_id)
+            except Exception as exc:
+                self._log.warning(
+                    "Failed to ensure guild settings exist",
+                    exc_info=exc,
+                    extra={"guild_id": self._config.guild_id},
+                )
         await self._sync_app_commands()
 
-    async def on_ready(self) -> None:  # pragma: no cover - simple log
-        assert self.user is not None
-        self._log.info(
-            "Quest ingestion bot ready",
-            extra={"bot_id": self.user.id},
-        )
+    async def on_ready(self) -> None:
+        if self.user is not None:
+            bot_id = self.user.id
+            bot_name = self.user.name
+            self._log.info(
+                f"Quest ingestion bot ready ({bot_name})",
+                extra={"bot_id": bot_id, "bot_name": bot_name},
+            )
+        else:
+            self._log.warning("Bot ready event fired but bot user is None")
+            await self.close()
 
     async def _sync_app_commands(self) -> None:
+        """Sync application commands against Discord."""
         try:
             if self._config.guild_id is not None:
-                guild_object = discord.Object(id=self._config.guild_id)
-                guild_commands = await self.tree.sync(guild=guild_object)
+                guild_commands = await self.tree.sync(
+                    guild=discord.Object(id=self._config.guild_id)
+                )
                 self._log.info(
                     "Synced guild application commands",
                     extra={
@@ -91,15 +107,16 @@ class IngestionBot(commands.Bot):
                         "commands": self._command_names(guild_commands),
                     },
                 )
-            global_commands = await self.tree.sync()
-            self._log.info(
-                "Synced global application commands",
-                extra={
-                    "scope": "global",
-                    "commands": self._command_names(global_commands),
-                },
-            )
-        except Exception as exc:  # pragma: no cover - defensive log
+            else:
+                global_commands = await self.tree.sync()
+                self._log.info(
+                    "Synced global application commands",
+                    extra={
+                        "scope": "global",
+                        "commands": self._command_names(global_commands),
+                    },
+                )
+        except Exception as exc:  # pragma: no cover
             self._log.warning("Failed to sync application commands", exc_info=exc)
 
     def _command_names(self, commands: Sequence[object]) -> list[str]:

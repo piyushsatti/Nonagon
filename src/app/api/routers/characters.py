@@ -1,3 +1,5 @@
+"""Routes for creating and maintaining Nonagon characters."""
+
 from fastapi import APIRouter, HTTPException
 
 import app.api.deps as deps
@@ -18,6 +20,7 @@ users_repo = deps.user_repo
     response_model_exclude_none=True,
 )
 async def create_character(body: CharacterCreate) -> Character:
+    """Create and persist a new character record owned by an existing user."""
     try:
         usecase = character_usecases.CreateCharacter(
             characters_repo=chars_repo,
@@ -46,6 +49,7 @@ async def create_character(body: CharacterCreate) -> Character:
     response_model_exclude_none=True,
 )
 async def get_character(character_id: str) -> Character:
+    """Retrieve a character by its unique identifier."""
     try:
         usecase = character_usecases.GetCharacter(characters_repo=chars_repo)
         character = await usecase.execute(character_id)
@@ -62,6 +66,7 @@ async def get_character(character_id: str) -> Character:
 async def patch_character(
     character_id: str, body: CharacterUpdate | None = None
 ) -> Character:
+    """Partially update character metadata such as links or descriptive text."""
     payload = body.model_dump(exclude_unset=True) if body else {}
 
     try:
@@ -89,6 +94,7 @@ async def patch_character(
 
 @router.delete("/{character_id}", status_code=204)
 async def delete_character(character_id: str) -> None:
+    """Remove an existing character when it should no longer appear in the roster."""
     try:
         usecase = character_usecases.DeleteCharacter(characters_repo=chars_repo)
         await usecase.execute(character_id)
@@ -103,6 +109,7 @@ async def delete_character(character_id: str) -> None:
     response_model_exclude_none=True,
 )
 async def inc_quests_played(character_id: str) -> Character:
+    """Increment the number of quests a character has played in."""
     try:
         usecase = character_usecases.IncrementCharacterQuestsPlayed(
             characters_repo=chars_repo,
@@ -119,6 +126,7 @@ async def inc_quests_played(character_id: str) -> Character:
     response_model_exclude_none=True,
 )
 async def inc_summaries_written(character_id: str) -> Character:
+    """Increment the number of summaries authored by the character."""
     try:
         usecase = character_usecases.IncrementCharacterSummariesWritten(
             characters_repo=chars_repo,
@@ -135,6 +143,7 @@ async def inc_summaries_written(character_id: str) -> Character:
     response_model_exclude_none=True,
 )
 async def update_last_played(character_id: str) -> Character:
+    """Record the last session date for a given character."""
     try:
         usecase = character_usecases.UpdateCharacterLastPlayed(
             characters_repo=chars_repo,
@@ -152,6 +161,7 @@ async def update_last_played(character_id: str) -> Character:
     response_model_exclude_none=True,
 )
 async def add_played_with(character_id: str, other_id: str) -> Character:
+    """Link two characters indicating they have played together."""
     try:
         usecase = character_usecases.AddCharacterPlayedWith(
             characters_repo=chars_repo,
@@ -168,6 +178,7 @@ async def add_played_with(character_id: str, other_id: str) -> Character:
     response_model_exclude_none=True,
 )
 async def remove_played_with(character_id: str, other_id: str) -> Character:
+    """Remove a played-with relationship between characters."""
     try:
         usecase = character_usecases.RemoveCharacterPlayedWith(
             characters_repo=chars_repo,
@@ -184,6 +195,7 @@ async def remove_played_with(character_id: str, other_id: str) -> Character:
     response_model_exclude_none=True,
 )
 async def add_played_in(character_id: str, quest_id: str) -> Character:
+    """Associate a quest the character participated in."""
     try:
         usecase = character_usecases.AddCharacterPlayedIn(
             characters_repo=chars_repo,
@@ -200,6 +212,7 @@ async def add_played_in(character_id: str, quest_id: str) -> Character:
     response_model_exclude_none=True,
 )
 async def remove_played_in(character_id: str, quest_id: str) -> Character:
+    """Remove an association between a character and a quest."""
     try:
         usecase = character_usecases.RemoveCharacterPlayedIn(
             characters_repo=chars_repo,
@@ -216,6 +229,7 @@ async def remove_played_in(character_id: str, quest_id: str) -> Character:
     response_model_exclude_none=True,
 )
 async def add_mentioned_in(character_id: str, summary_id: str) -> Character:
+    """Mark that a character appears in a quest summary."""
     try:
         usecase = character_usecases.AddCharacterMentionedIn(
             characters_repo=chars_repo,
@@ -232,6 +246,7 @@ async def add_mentioned_in(character_id: str, summary_id: str) -> Character:
     response_model_exclude_none=True,
 )
 async def remove_mentioned_in(character_id: str, summary_id: str) -> Character:
+    """Remove a summary mention from the character's record."""
     try:
         usecase = character_usecases.RemoveCharacterMentionedIn(
             characters_repo=chars_repo,

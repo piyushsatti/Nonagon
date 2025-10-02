@@ -1,3 +1,5 @@
+"""API endpoints for managing adventure summaries and their relationships."""
+
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
@@ -22,6 +24,7 @@ quests_repo = deps.quests_repo
     response_model_exclude_none=True,
 )
 async def create_summary(body: SummaryCreate) -> Summary:
+    """Create a new adventure summary document with optional cross-links."""
     try:
         usecase = summary_usecases.CreateSummary(
             summaries_repo=summaries_repo,
@@ -54,6 +57,7 @@ async def create_summary(body: SummaryCreate) -> Summary:
     response_model_exclude_none=True,
 )
 async def get_summary(summary_id: str) -> Summary:
+    """Fetch an adventure summary by identifier."""
     try:
         usecase = summary_usecases.GetSummary(summaries_repo=summaries_repo)
         summary = await usecase.execute(summary_id)
@@ -68,6 +72,7 @@ async def get_summary(summary_id: str) -> Summary:
     response_model_exclude_none=True,
 )
 async def patch_summary(summary_id: str, body: SummaryUpdate | None = None) -> Summary:
+    """Modify summary content, keeping other metadata intact unless supplied."""
     payload = body.model_dump(exclude_unset=True) if body else {}
 
     try:
@@ -92,6 +97,7 @@ async def patch_summary(summary_id: str, body: SummaryUpdate | None = None) -> S
 
 @router.delete("/{summary_id}", status_code=204)
 async def delete_summary(summary_id: str) -> None:
+    """Remove a summary from persistence."""
     try:
         usecase = summary_usecases.DeleteSummary(summaries_repo=summaries_repo)
         await usecase.execute(summary_id)
@@ -107,6 +113,7 @@ async def delete_summary(summary_id: str) -> None:
 async def update_last_edited(
     summary_id: str, edited_at: datetime | None = None
 ) -> Summary:
+    """Refresh the last-edited timestamp for a summary."""
     try:
         usecase = summary_usecases.TouchSummary(summaries_repo=summaries_repo)
         summary = await usecase.execute(summary_id, edited_at=edited_at)
@@ -121,6 +128,7 @@ async def update_last_edited(
     response_model_exclude_none=True,
 )
 async def add_player(summary_id: str, user_id: str) -> Summary:
+    """Associate a player with the summary participation list."""
     try:
         usecase = summary_usecases.AddPlayerToSummary(
             summaries_repo=summaries_repo,
@@ -138,6 +146,7 @@ async def add_player(summary_id: str, user_id: str) -> Summary:
     response_model_exclude_none=True,
 )
 async def remove_player(summary_id: str, user_id: str) -> Summary:
+    """Remove a player from the recorded summary participation."""
     try:
         usecase = summary_usecases.RemovePlayerFromSummary(
             summaries_repo=summaries_repo,
@@ -155,6 +164,7 @@ async def remove_player(summary_id: str, user_id: str) -> Summary:
     response_model_exclude_none=True,
 )
 async def add_character(summary_id: str, character_id: str) -> Summary:
+    """Record that a character appears in the summary."""
     try:
         usecase = summary_usecases.AddCharacterToSummary(
             summaries_repo=summaries_repo,
@@ -172,6 +182,7 @@ async def add_character(summary_id: str, character_id: str) -> Summary:
     response_model_exclude_none=True,
 )
 async def remove_character(summary_id: str, character_id: str) -> Summary:
+    """Remove a character appearance from the summary."""
     try:
         usecase = summary_usecases.RemoveCharacterFromSummary(
             summaries_repo=summaries_repo,
@@ -195,6 +206,7 @@ async def list_summaries(
     limit: int = 50,
     offset: int = 0,
 ) -> list[Summary]:
+    """Return a paginated list of summaries with optional filters."""
     try:
         usecase = summary_usecases.ListSummaries(summaries_repo=summaries_repo)
         summaries = await usecase.execute(

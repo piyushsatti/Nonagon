@@ -20,6 +20,16 @@ Set the following environment variables before starting the bot:
 - `PLAYER_ROLE_ID` – Discord role ID granted to players allowed to join quests and create characters.
 - `REFEREE_ROLE_ID` – Discord role ID used to identify referees/DMs.
 - `MONGODB_URI` – connection string for the MongoDB deployment.
+- `API_ADMIN_TOKEN` – shared secret used by the FastAPI admin endpoints.
+
+For automated testing and local development, a ready-to-use `.env.test` file is bundled.
+
+1. Copy `.env.test` if you want to customise values: `cp .env.test .env.local`.
+2. Bring up MongoDB locally: `docker compose -f docker-compose.dev.yml up -d mongo`.
+3. Install dev dependencies: `pip install -e .[dev]`.
+4. Run the API test suite (uses the test env values automatically): `pytest tests/api`.
+
+The pytest fixtures read `.env.test` (and fall back to `.env`) so you can override the Mongo URI, database name, or admin token without exporting variables manually.
 
 ### Discord bot features
 

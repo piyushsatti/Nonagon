@@ -1,3 +1,5 @@
+"""FastAPI application entry point and router composition for the Nonagon API."""
+
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
@@ -27,6 +29,7 @@ app.include_router(summaries_router)
 
 @app.get("/healthz")
 def healthz():
+    """Lightweight health check used by deployment probes."""
     return {"ok": True}
 
 

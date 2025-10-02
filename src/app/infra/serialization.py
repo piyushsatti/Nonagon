@@ -1,10 +1,13 @@
 # app/infra/mongo/serialization.py
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import fields, is_dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Union, get_args, get_origin
+from types import UnionType
+from typing import Any, Tuple, Union, cast, get_args, get_origin, get_type_hints
+from typing import Iterable as TypingIterable
 
 # ---------- Encoding (Python -> BSON-friendly) ----------
 
@@ -30,10 +33,12 @@ def to_bson(x: Any) -> Any:
 
     # dicts / sequences -> recurse
     if isinstance(x, dict):
-        return {k: to_bson(v) for k, v in x.items()}
+        items: Iterable[Tuple[Any, Any]] = cast(Iterable[Tuple[Any, Any]], x.items())
+        return {k: to_bson(v) for k, v in items}
 
     if isinstance(x, (list, tuple, set)):
-        return [to_bson(v) for v in x]
+        seq: Iterable[Any] = cast(Iterable[Any], x)
+        return [to_bson(v) for v in seq]
 
     # everything else: pass through (int, str, bool, None, etc.)
     return x
@@ -52,10 +57,12 @@ def from_bson(cls: type, doc: Any) -> Any:
 
     if is_dataclass(cls):
         kwargs = {}
+        type_hints = get_type_hints(cls)
         for f in fields(cls):
             if f.name not in doc:
                 continue
-            kwargs[f.name] = _from_bson_value(f.type, doc[f.name])
+            expected_type = type_hints.get(f.name, f.type)
+            kwargs[f.name] = _from_bson_value(expected_type, doc[f.name])
         return cls(**kwargs)
 
     # Fallback: if a bare type was passed (not a dataclass), just coerce value
@@ -69,7 +76,7 @@ def _from_bson_value(expected_type: Any, value: Any) -> Any:
     # Handle typing.Optional[...] / Union[..., None]
     origin = get_origin(expected_type)
     args = get_args(expected_type)
-    if origin is Union:
+    if origin in (Union, UnionType):
         # pick the first non-None type
         inner = next((a for a in args if a is not type(None)), Any)
         return _from_bson_value(inner, value)
@@ -77,7 +84,8 @@ def _from_bson_value(expected_type: Any, value: Any) -> Any:
     # Handle collections like List[T], Set[T], Tuple[T]
     if origin in (list, set, tuple):
         inner = args[0] if args else Any
-        seq = [_from_bson_value(inner, v) for v in (value or [])]
+        raw_iter: TypingIterable[Any] = cast(TypingIterable[Any], value or [])
+        seq = [_from_bson_value(inner, v) for v in raw_iter]
         if origin is list:
             return list(seq)
         if origin is set:

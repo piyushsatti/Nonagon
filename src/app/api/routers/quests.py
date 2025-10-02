@@ -1,3 +1,5 @@
+"""REST endpoints for orchestrating quest lifecycle and signups."""
+
 from datetime import timedelta
 
 from fastapi import APIRouter, HTTPException
@@ -21,6 +23,7 @@ chars_repo = deps.chars_repo
     response_model_exclude_none=True,
 )
 async def create_quest(body: QuestCreate) -> Quest:
+    """Create a quest announcement from incoming Discord ingestion data."""
     try:
         usecase = quest_usecases.CreateQuest(
             quests_repo=quests_repo,
@@ -52,6 +55,7 @@ async def create_quest(body: QuestCreate) -> Quest:
     response_model_exclude_none=True,
 )
 async def get_quest(quest_id: str) -> Quest:
+    """Fetch a quest by its identifier."""
     try:
         usecase = quest_usecases.GetQuest(quests_repo=quests_repo)
         quest = await usecase.execute(quest_id)
@@ -66,6 +70,7 @@ async def get_quest(quest_id: str) -> Quest:
     response_model_exclude_none=True,
 )
 async def patch_quest(quest_id: str, body: QuestUpdate | None = None) -> Quest:
+    """Update top-level quest details such as title and timing."""
     payload = body.model_dump(exclude_unset=True) if body else {}
 
     try:
@@ -89,6 +94,7 @@ async def patch_quest(quest_id: str, body: QuestUpdate | None = None) -> Quest:
 
 @router.delete("/{quest_id}", status_code=204)
 async def delete_quest(quest_id: str) -> None:
+    """Remove a quest from the catalog."""
     try:
         usecase = quest_usecases.DeleteQuest(quests_repo=quests_repo)
         await usecase.execute(quest_id)
@@ -103,6 +109,7 @@ async def delete_quest(quest_id: str) -> None:
     response_model_exclude_none=True,
 )
 async def add_signup(quest_id: str, payload: QuestSignup) -> Quest:
+    """Register a player's signup for a quest."""
     try:
         usecase = quest_usecases.AddPlayerSignup(
             quests_repo=quests_repo,
@@ -125,6 +132,7 @@ async def add_signup(quest_id: str, payload: QuestSignup) -> Quest:
     response_model_exclude_none=True,
 )
 async def remove_signup(quest_id: str, user_id: str) -> Quest:
+    """Remove a player's signup from a quest."""
     try:
         usecase = quest_usecases.RemovePlayerSignup(
             quests_repo=quests_repo,
@@ -142,6 +150,7 @@ async def remove_signup(quest_id: str, user_id: str) -> Quest:
     response_model_exclude_none=True,
 )
 async def select_signup(quest_id: str, user_id: str) -> Quest:
+    """Mark a user's signup as selected for the quest."""
     try:
         usecase = quest_usecases.SelectPlayerSignup(
             quests_repo=quests_repo,
@@ -160,6 +169,7 @@ async def select_signup(quest_id: str, user_id: str) -> Quest:
     response_model_exclude_none=True,
 )
 async def close_signups(quest_id: str) -> Quest:
+    """Set quest signups to closed once the roster is final."""
     try:
         usecase = quest_usecases.CloseQuestSignups(quests_repo=quests_repo)
         quest = await usecase.execute(quest_id)
@@ -174,6 +184,7 @@ async def close_signups(quest_id: str) -> Quest:
     response_model_exclude_none=True,
 )
 async def set_completed(quest_id: str) -> Quest:
+    """Flag a quest as completed."""
     try:
         usecase = quest_usecases.MarkQuestCompleted(quests_repo=quests_repo)
         quest = await usecase.execute(quest_id)
@@ -188,6 +199,7 @@ async def set_completed(quest_id: str) -> Quest:
     response_model_exclude_none=True,
 )
 async def set_cancelled(quest_id: str) -> Quest:
+    """Flag a quest as cancelled."""
     try:
         usecase = quest_usecases.MarkQuestCancelled(quests_repo=quests_repo)
         quest = await usecase.execute(quest_id)
@@ -202,6 +214,7 @@ async def set_cancelled(quest_id: str) -> Quest:
     response_model_exclude_none=True,
 )
 async def set_announced(quest_id: str) -> Quest:
+    """Mark a quest as announced to players."""
     try:
         usecase = quest_usecases.MarkQuestAnnounced(quests_repo=quests_repo)
         quest = await usecase.execute(quest_id)
