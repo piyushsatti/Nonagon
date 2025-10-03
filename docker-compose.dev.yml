@@ -1,0 +1,43 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: nonagon-api
+    environment:
+      MONGODB_URI: ${MONGODB_URI:?set Atlas connection string}
+      DB_NAME: ${DB_NAME:-nonagon}
+    ports: ["8000:8000"]
+    volumes:
+      - ./src:/app/src
+      - ./logs:/var/log/nonagon
+    command:
+      - /bin/sh
+      - -c
+      - |
+        uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload \
+          2>&1 | tee -a /var/log/nonagon/api.log
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+    container_name: nonagon-bot
+    environment:
+      MONGODB_URI: "${MONGODB_URI:?set Atlas connection string}"
+      DB_NAME: "${DB_NAME:-nonagon}"
+      DISCORD_TOKEN: "${DISCORD_TOKEN:?set DISCORD_TOKEN}"
+      DISCORD_GUILD_ID: "${DISCORD_GUILD_ID:-1372610481860120638}"
+      QUEST_CHANNEL_ID: "${QUEST_CHANNEL_ID:-}"
+      SUMMARY_CHANNEL_ID: "${SUMMARY_CHANNEL_ID:-}"
+      PLAYER_ROLE_ID: "${PLAYER_ROLE_ID:-}"
+      REFEREE_ROLE_ID: "${REFEREE_ROLE_ID:-}"
+    volumes:
+      - ./src:/app/src
+      - ./logs:/var/log/nonagon
+    command:
+      - /bin/sh
+      - -c
+      - |
+        python -m app.bot.main \
+          2>&1 | tee -a /var/log/nonagon/bot.log
