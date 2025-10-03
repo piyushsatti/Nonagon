@@ -1,32 +1,22 @@
 services:
-  mongo:
-    image: mongo:6.0
-    container_name: nonagon-mongo
-    ports: ["27017:27017"]
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: example
-    healthcheck:
-      test:
-        ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
   api:
     build:
       context: .
       dockerfile: Dockerfile.api
     container_name: nonagon-api
     environment:
-      MONGODB_URI: mongodb://root:example@mongo:27017/?authSource=admin
-      DB_NAME: nonagon
-    depends_on:
-      mongo: { condition: service_healthy }
+      MONGODB_URI: ${MONGODB_URI:?set Atlas connection string}
+      DB_NAME: ${DB_NAME:-nonagon}
     ports: ["8000:8000"]
     volumes:
       - ./src:/app/src
-    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload
+      - ./logs:/var/log/nonagon
+    command:
+      - /bin/sh
+      - -c
+      - |
+        uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload \
+          2>&1 | tee -a /var/log/nonagon/api.log
 
   bot:
     build:
@@ -34,16 +24,20 @@ services:
       dockerfile: Dockerfile.bot
     container_name: nonagon-bot
     environment:
-      MONGODB_URI: mongodb://root:example@mongo:27017/?authSource=admin
-      DB_NAME: nonagon
-      DISCORD_TOKEN: ${DISCORD_TOKEN:-replace_me_in_.env}
-      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
-      QUEST_CHANNEL_ID: ${QUEST_CHANNEL_ID:-}
-      SUMMARY_CHANNEL_ID: ${SUMMARY_CHANNEL_ID:-}
-      PLAYER_ROLE_ID: ${PLAYER_ROLE_ID:-}
-      REFEREE_ROLE_ID: ${REFEREE_ROLE_ID:-}
-    depends_on:
-      mongo: { condition: service_healthy }
+      MONGODB_URI: "${MONGODB_URI:?set Atlas connection string}"
+      DB_NAME: "${DB_NAME:-nonagon}"
+      DISCORD_TOKEN: "${DISCORD_TOKEN:?set DISCORD_TOKEN}"
+      DISCORD_GUILD_ID: "${DISCORD_GUILD_ID:-1372610481860120638}"
+      QUEST_CHANNEL_ID: "${QUEST_CHANNEL_ID:-}"
+      SUMMARY_CHANNEL_ID: "${SUMMARY_CHANNEL_ID:-}"
+      PLAYER_ROLE_ID: "${PLAYER_ROLE_ID:-}"
+      REFEREE_ROLE_ID: "${REFEREE_ROLE_ID:-}"
     volumes:
       - ./src:/app/src
-    # no ports; it's a worker
+      - ./logs:/var/log/nonagon
+    command:
+      - /bin/sh
+      - -c
+      - |
+        python -m app.bot.main \
+          2>&1 | tee -a /var/log/nonagon/bot.log

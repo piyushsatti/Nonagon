@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 import pytest
 
 from app.bot.ingestion.summaries_pipeline import (
-    SummaryParseError,
     map_parsed_to_domain,
     map_summary_to_record,
     parse_message,
@@ -75,25 +74,82 @@ def test_parse_and_map_summary_round_trip() -> None:
     assert record.related_links == ["https://example.com/log"]
 
 
-def test_parse_message_requires_quest_id() -> None:
+def test_parse_message_missing_quest_reference_returns_partial_result() -> None:
     raw = """# Adventure Summary
 Missing metadata block
 
 ## Summary
 Just vibes.
 """
-    with pytest.raises(SummaryParseError):
-        parse_message(
-            raw=raw,
-            author_discord_id="1111",
-            author_display_name="Astra",
-            guild_id=1,
-            channel_id=2,
-            message_id=3,
-            created_at=datetime.now(timezone.utc),
-            edited_at=None,
-            parent_message_id=None,
+    parsed = parse_message(
+        raw=raw,
+        author_discord_id="1111",
+        author_display_name="Astra",
+        guild_id=1,
+        channel_id=2,
+        message_id=3,
+        created_at=datetime.now(timezone.utc),
+        edited_at=None,
+        parent_message_id=None,
+    )
+
+    assert parsed.quest_id is None
+    assert parsed.quest_message_ref is None
+    assert parsed.content_md.strip() == "Just vibes."
+
+
+def test_map_parsed_to_domain_requires_quest_reference() -> None:
+    parsed = parse_message(
+        raw="""# Adventure Summary
+Missing metadata block
+
+## Summary
+Just vibes.
+""",
+        author_discord_id="1111",
+        author_display_name="Astra",
+        guild_id=1,
+        channel_id=2,
+        message_id=3,
+        created_at=datetime.now(timezone.utc),
+        edited_at=None,
+        parent_message_id=None,
+    )
+
+    with pytest.raises(ValueError):
+        map_parsed_to_domain(
+            parsed,
+            summary_id="SUMM9999",
+            author_user_id=None,
+            attachments=[],
+            summary_kind=SummaryKind.PLAYER,
         )
+
+
+def test_parse_accepts_discord_link_when_no_quest_id() -> None:
+    raw = """# Adventure Summary: Linked Only
+**Link To Quest:** https://discord.com/channels/1/2/3
+
+## Summary
+Victory from the jaws of defeat.
+"""
+
+    parsed = parse_message(
+        raw=raw,
+        author_discord_id="9999",
+        author_display_name="Chronicler",
+        guild_id=23,
+        channel_id=42,
+        message_id=84,
+        created_at=datetime.now(timezone.utc),
+        edited_at=None,
+        parent_message_id=None,
+    )
+
+    assert parsed.quest_id is None
+    assert parsed.quest_message_ref is not None
+    assert parsed.quest_message_ref.channel_id == "2"
+    assert parsed.quest_message_ref.message_id == "3"
 
 
 def test_parse_without_players_defaults_author() -> None:

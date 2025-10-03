@@ -12,7 +12,7 @@
 
 ## Configuration
 
-Set the following environment variables before starting the bot:
+Set the following environment variables before starting the bot (export them in your shell, CI system, or Docker secrets manager):
 
 - `DISCORD_TOKEN` – bot token from the Discord developer portal.
 - `QUEST_CHANNEL_ID` – channel ID for quest announcements to ingest.
@@ -22,14 +22,49 @@ Set the following environment variables before starting the bot:
 - `MONGODB_URI` – connection string for the MongoDB deployment.
 - `API_ADMIN_TOKEN` – shared secret used by the FastAPI admin endpoints.
 
-For automated testing and local development, a ready-to-use `.env.test` file is bundled.
+Example session setup:
 
-1. Copy `.env.test` if you want to customise values: `cp .env.test .env.local`.
-2. Bring up MongoDB locally: `docker compose -f docker-compose.dev.yml up -d mongo`.
-3. Install dev dependencies: `pip install -e .[dev]`.
-4. Run the API test suite (uses the test env values automatically): `pytest tests/api`.
+```bash
+export DISCORD_TOKEN="<discord bot token>"
+export MONGODB_URI="mongodb+srv://..."
+export API_ADMIN_TOKEN="<shared admin token>"
+```
 
-The pytest fixtures read `.env.test` (and fall back to `.env`) so you can override the Mongo URI, database name, or admin token without exporting variables manually.
+For local development you can also store the Discord token in a `.env` file at the project root; the bot will read it automatically if the environment variable is missing. Other guild/channel configuration still comes from real environment variables or the in-bot setup commands.
+
+Install dev dependencies with `pip install -e .[dev]`, then run the API suite: `pytest tests/api`.
+
+> **Testing defaults:** the pytest fixtures automatically read `.env.test` for isolated Mongo/Test tokens so you can keep runtime secrets out of source control.
+
+> **Docker note:** the API and bot containers now trust system certificate authorities (`ca-certificates`) so they can establish TLS connections to Atlas without extra configuration. Pass secrets in with `docker compose --env-file` or environment exports; the containers no longer read from `.env` automatically.
+
+> **Health check note:** the FastAPI app performs a MongoDB ping during startup—if the connection string is invalid or the cluster is unreachable, the container will exit immediately with a descriptive error.
+
+The pytest fixtures read `.env.test`, so you can override the Mongo URI, database name, or admin token for tests without changing your runtime environment.
+
+### Local development without Docker
+
+If you prefer to run the services directly, use the helper script `scripts/run-local.sh`:
+
+```bash
+chmod +x scripts/run-local.sh  # one-time setup
+
+# Start both FastAPI (background) and the Discord bot (foreground)
+./scripts/run-local.sh
+
+# Or run a single component
+./scripts/run-local.sh api
+./scripts/run-local.sh bot
+```
+
+The script automatically loads the first available dotenv file (`.env.local` or `.env`) unless you explicitly pass `ENV_FILE=/path/to/file`. Make sure at least these environment variables are defined before launching:
+
+- `MONGODB_URI`
+- `DB_NAME` (optional, defaults to `nonagon`)
+- `API_ADMIN_TOKEN` (for protected API routes)
+- `DISCORD_TOKEN`, `DISCORD_GUILD_ID`, `QUEST_CHANNEL_ID`, `SUMMARY_CHANNEL_ID`, `REFEREE_ROLE_ID`, `LOG_CHANNEL_ID` (bot only)
+
+Logs are written to the `logs/` directory while still streaming to the terminal.
 
 ### Discord bot features
 

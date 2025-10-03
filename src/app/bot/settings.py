@@ -10,3 +10,4 @@ class GuildBotSettings:
     summary_channel_id: int | None = None
     player_role_id: int | None = None
     referee_role_id: int | None = None
+    log_channel_id: int | None = None

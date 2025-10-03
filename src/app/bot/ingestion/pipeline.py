@@ -10,23 +10,38 @@ from pydantic import BaseModel, Field, HttpUrl
 
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 
-TITLE_PATTERN = re.compile(r"^#\s*:gw:\s*(?P<title>.+)$", re.MULTILINE)
+TITLE_PATTERN = re.compile(
+    r"^#\s*(?:<:gw:\d+>|:gw:)\s*(?P<title>.+)$",
+    re.MULTILINE,
+)
+GENERIC_TITLE_PATTERN = re.compile(r"^#\s*(?P<title>.+)$", re.MULTILINE)
 REGION_PATTERN = re.compile(
-    r"^\*\*Region:\*\*\s*(?P<name>[^,]+),\s*(?P<hex>\S+)$", re.MULTILINE
+    r"^\*\*Region:\*\*\s*(?P<name>[^\n,]+?)(?:,\s*(?P<hex>\S+))?$",
+    re.MULTILINE,
 )
 TAGS_PATTERN = re.compile(r"^\*\*Tags:\*\*\s*(?P<tags>.+)$", re.MULTILINE)
-SCHED_PATTERN = re.compile(
-    r"^\*\*Scheduling\s*&\s*Duration:\*\*\s*(?P<start>[^–]+?)\s*UTC\s*–\s*(?P<end>.+?)UTC",
+STRICT_SCHED_PATTERN = re.compile(
+    r"^\*\*Scheduling\s*&\s*Duration:\*\*\s*(?P<start>[^-]+?)\s*UTC\s*-\s*(?P<end>.+?)UTC",
+    re.MULTILINE,
+)
+FLEX_SCHED_PATTERN = re.compile(
+    r"^\*\*Scheduling\s*&\s*Duration:\*\*\s*(?P<body>.+)$",
     re.MULTILINE,
 )
 TABLE_PATTERN = re.compile(r"^\*\*My table:\*\*\s*(?P<url>\S+)$", re.MULTILINE)
-LINKED_HEADER_PATTERN = re.compile(r"^\*\*Linked Quests:\*\*$", re.MULTILINE)
+LINKED_HEADER_PATTERN = re.compile(r"^\*\*Linked Quests:\*\*.*$", re.MULTILINE)
 EVENT_PATTERN = re.compile(r"^\*\*Link to event:\*\*\s*(?P<url>\S+)$", re.MULTILINE)
 DISCORD_LINK_PATTERN = re.compile(
     r"https://discord(?:app)?\\.com/channels/(?P<guild_id>\d+)/(?P<channel_id>\d+)/(?P<message_id>\d+)",
     re.IGNORECASE,
 )
 IMAGE_PATTERN = re.compile(r"https?://[^\s]+", re.IGNORECASE)
+DISCORD_TIMESTAMP_PATTERN = re.compile(r"<t:(?P<ts>\d+)(?::[a-zA-Z])?>")
+HOUR_RANGE_PATTERN = re.compile(
+    r"(?P<min>\d+)(?:\s*[-–]\s*(?P<max>\d+))?\s*(?:hour|hr)",
+    re.IGNORECASE,
+)
+GENERIC_URL_PATTERN = re.compile(r"https?://[^\s>]+")
 
 MIN_DURATION_MIN = 15
 MAX_DURATION_MIN = 24 * 60
@@ -132,6 +147,8 @@ def parse_message(
     errors: list[str] = []
     title_match = TITLE_PATTERN.search(raw)
     if not title_match:
+        title_match = GENERIC_TITLE_PATTERN.search(raw)
+    if not title_match:
         errors.append("Missing quest title heading '# :gw:'")
         title = ""
     else:
@@ -148,26 +165,33 @@ def parse_message(
         region_hex = ""
     else:
         region_name = region_match.group("name").strip()
-        region_hex = region_match.group("hex").strip()
+        region_hex = (region_match.group("hex") or "").strip()
 
     tags = _extract_tags(raw)
     if not tags:
         errors.append("Missing or malformed '**Tags:**' section")
 
-    sched_match = SCHED_PATTERN.search(raw)
-    if not sched_match:
-        errors.append("Missing '**Scheduling & Duration:**' section")
-        starts_at = ends_at = None
-        duration_minutes = 0
-    else:
+    starts_at = ends_at = None
+    duration_minutes = 0
+    sched_match = STRICT_SCHED_PATTERN.search(raw)
+    if sched_match:
         try:
             starts_at, ends_at, duration_minutes = _parse_schedule(
                 sched_match.group("start"), sched_match.group("end")
             )
         except ValueError as exc:
             errors.append(str(exc))
-            starts_at = ends_at = None
-            duration_minutes = 0
+    else:
+        flex_match = FLEX_SCHED_PATTERN.search(raw)
+        if flex_match:
+            try:
+                starts_at, ends_at, duration_minutes = _parse_schedule_flexible(
+                    flex_match.group("body")
+                )
+            except ValueError as exc:
+                errors.append(str(exc))
+        else:
+            errors.append("Missing '**Scheduling & Duration:**' section")
 
     table_match = TABLE_PATTERN.search(raw)
     if not table_match:
@@ -175,15 +199,15 @@ def parse_message(
         table_url = ""
     else:
         table_url = table_match.group("url").strip()
+    _, table_channel_id, _ = _split_discord_channel_path(table_url)
 
-    event_match = EVENT_PATTERN.search(raw)
-    if not event_match:
-        errors.append("Missing '**Link to event:**' URL")
-        event_url = ""
-    else:
-        event_url = event_match.group("url").strip()
+    event_url = _extract_event_url(raw)
+    if not event_url:
+        event_url = table_url
+        if not event_url:
+            errors.append("Missing event URL")
 
-    linked_messages = _extract_linked_messages(raw)
+    linked_messages = _extract_linked_messages(raw, fallback_channel=table_channel_id)
     if not linked_messages:
         errors.append("Missing linked quest URLs under '**Linked Quests:**'")
 
@@ -332,7 +356,10 @@ def map_parsed_to_record(
 
 
 def record_to_document(record: QuestRecord) -> Dict[str, Any]:
-    return record.model_dump(mode="python")
+    payload = record.model_dump(mode="python")
+    payload["my_table_url"] = str(record.my_table_url)
+    payload["event_url"] = str(record.event_url)
+    return payload
 
 
 def document_to_record(doc: Mapping[str, Any]) -> QuestRecord:
@@ -343,14 +370,18 @@ def document_to_record(doc: Mapping[str, Any]) -> QuestRecord:
 
 def _extract_description(raw: str) -> str:
     lines = raw.splitlines()
-    try:
-        title_idx = next(i for i, line in enumerate(lines) if line.startswith("# :gw:"))
-    except StopIteration:
+    title_idx = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if TITLE_PATTERN.match(stripped) or GENERIC_TITLE_PATTERN.match(stripped):
+            title_idx = i
+            break
+    if title_idx is None:
         return ""
 
     desc_lines: list[str] = []
     for line in lines[title_idx + 1 :]:
-        if line.startswith("## "):
+        if line.strip().startswith("## "):
             break
         desc_lines.append(line)
     while desc_lines and not desc_lines[-1].strip():
@@ -409,33 +440,140 @@ def _parse_schedule(start_str: str, end_str: str) -> tuple[datetime, datetime, i
     return start_dt, end_dt, duration
 
 
-def _extract_linked_messages(raw: str) -> list[tuple[str, str, str]]:
-    linked_matches = list(LINKED_HEADER_PATTERN.finditer(raw))
-    if not linked_matches:
-        return []
-    header = linked_matches[0]
-    post_header = raw[header.end() :]
-    lines = post_header.strip().splitlines()
-    result: list[tuple[str, str, str]] = []
+def _extract_linked_messages(
+    raw: str, *, fallback_channel: str | None = None
+) -> list[tuple[str, str, str]]:
+    lines = raw.splitlines()
+    collecting = False
+    results: list[tuple[str, str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+
     for line in lines:
-        line = line.strip()
-        if not line:
+        stripped = line.strip()
+        if not stripped:
             continue
-        if line.startswith("**Link to event") or (
-            line.startswith("**") and not line.startswith("**Linked")
+        lowered = stripped.lower()
+        if lowered.startswith("**linked quests:**"):
+            collecting = True
+            remainder = stripped[len("**Linked Quests:**") :].strip()
+            for link in _extract_links_from_text(
+                remainder, fallback_channel=fallback_channel
+            ):
+                if link not in seen:
+                    seen.add(link)
+                    results.append(link)
+            continue
+        if not collecting:
+            continue
+        if lowered.startswith("**link to event") or (
+            lowered.startswith("**") and not lowered.startswith("**linked quests")
         ):
             break
-        match = DISCORD_LINK_PATTERN.search(line)
-        if not match:
+        for link in _extract_links_from_text(
+            stripped, fallback_channel=fallback_channel
+        ):
+            if link not in seen:
+                seen.add(link)
+                results.append(link)
+
+    return results
+
+
+def _parse_schedule_flexible(body: str) -> tuple[datetime, datetime, int]:
+    ts_match = DISCORD_TIMESTAMP_PATTERN.search(body)
+    if not ts_match:
+        raise ValueError("Unable to locate Discord timestamp in schedule")
+
+    start_ts = datetime.fromtimestamp(int(ts_match.group("ts")), tz=timezone.utc)
+    duration_minutes = _guess_duration_minutes(body)
+    end_ts = start_ts + timedelta(minutes=duration_minutes)
+    return start_ts, end_ts, duration_minutes
+
+
+def _guess_duration_minutes(text: str) -> int:
+    match = HOUR_RANGE_PATTERN.search(text)
+    if match:
+        min_hours = int(match.group("min"))
+        max_hours = match.group("max")
+        if max_hours:
+            duration_hours = (min_hours + int(max_hours)) / 2
+        else:
+            duration_hours = float(min_hours)
+        duration_minutes = int(duration_hours * 60)
+    else:
+        duration_minutes = 3 * 60
+
+    duration_minutes = max(MIN_DURATION_MIN, duration_minutes)
+    duration_minutes = min(MAX_DURATION_MIN, duration_minutes)
+    return duration_minutes
+
+
+def _extract_event_url(raw: str) -> str:
+    event_match = EVENT_PATTERN.search(raw)
+    if event_match:
+        return _clean_url(event_match.group("url"))
+
+    preferred: list[str] = []
+    secondary: list[str] = []
+    for match in GENERIC_URL_PATTERN.finditer(raw):
+        url = _clean_url(match.group(0))
+        lowered = url.lower()
+        if "event" in lowered or "discord.com/events" in lowered:
+            preferred.append(url)
+        elif "discord.gg" in lowered or "discord.com/channels" in lowered:
+            secondary.append(url)
+
+    if preferred:
+        return preferred[0]
+    if secondary:
+        return secondary[0]
+    return ""
+
+
+def _extract_links_from_text(
+    text: str, *, fallback_channel: str | None = None
+) -> list[tuple[str, str, str]]:
+    matches: list[tuple[str, str, str]] = []
+    for url_match in GENERIC_URL_PATTERN.finditer(text):
+        url = _clean_url(url_match.group(0))
+        guild_id, channel_id, message_id = _split_discord_channel_path(url)
+        if guild_id is None:
             continue
-        result.append(
-            (
-                match.group("guild_id"),
-                match.group("channel_id"),
-                match.group("message_id"),
-            )
-        )
-    return result
+        if message_id is None:
+            if channel_id is None or fallback_channel is None:
+                continue
+            channel = fallback_channel
+            message = channel_id
+        else:
+            channel = channel_id or fallback_channel
+            if channel is None:
+                continue
+            message = message_id
+        matches.append((guild_id, channel, message))
+    return matches
+
+
+def _clean_url(url: str) -> str:
+    return url.rstrip(").,>\n\r")
+
+
+def _split_discord_channel_path(url: str) -> tuple[str | None, str | None, str | None]:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return None, None, None
+    if parsed.scheme not in {"http", "https"}:
+        return None, None, None
+    host = parsed.netloc.lower()
+    if host not in {"discord.com", "discordapp.com"}:
+        return None, None, None
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    if not segments or segments[0].lower() != "channels":
+        return None, None, None
+    guild_id = segments[1] if len(segments) > 1 else None
+    channel_id = segments[2] if len(segments) > 2 else None
+    message_id = segments[3] if len(segments) > 3 else None
+    return guild_id, channel_id, message_id
 
 
 def _extract_first_image_url(raw: str) -> str | None:

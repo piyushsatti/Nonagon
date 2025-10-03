@@ -19,25 +19,36 @@ class BotSettingsRepository:
             [("quest_channel_id", ASCENDING)],
             name="ix_bot_settings_quest_channel",
             partialFilterExpression={
-                "quest_channel_id": {"$exists": True, "$ne": None}
+                "quest_channel_id": {"$exists": True, "$type": ["int", "long"]}
             },
         )
         await self._collection.create_index(
             [("summary_channel_id", ASCENDING)],
             name="ix_bot_settings_summary_channel",
             partialFilterExpression={
-                "summary_channel_id": {"$exists": True, "$ne": None}
+                "summary_channel_id": {"$exists": True, "$type": ["int", "long"]}
             },
         )
         await self._collection.create_index(
             [("player_role_id", ASCENDING)],
             name="ix_bot_settings_player_role",
-            partialFilterExpression={"player_role_id": {"$exists": True, "$ne": None}},
+            partialFilterExpression={
+                "player_role_id": {"$exists": True, "$type": ["int", "long"]}
+            },
         )
         await self._collection.create_index(
             [("referee_role_id", ASCENDING)],
             name="ix_bot_settings_referee_role",
-            partialFilterExpression={"referee_role_id": {"$exists": True, "$ne": None}},
+            partialFilterExpression={
+                "referee_role_id": {"$exists": True, "$type": ["int", "long"]}
+            },
+        )
+        await self._collection.create_index(
+            [("log_channel_id", ASCENDING)],
+            name="ix_bot_settings_log_channel",
+            partialFilterExpression={
+                "log_channel_id": {"$exists": True, "$type": ["int", "long"]}
+            },
         )
 
     async def get(self, guild_id: int) -> GuildBotSettings | None:
@@ -53,6 +64,16 @@ class BotSettingsRepository:
         )
         return settings
 
+    async def list_guild_ids(self) -> list[int]:
+        cursor = self._collection.find({}, projection={"_id": True})
+        guild_ids: list[int] = []
+        async for doc in cursor:
+            try:
+                guild_ids.append(int(doc["_id"]))
+            except (KeyError, TypeError, ValueError):  # pragma: no cover - defensive
+                continue
+        return guild_ids
+
     @staticmethod
     def _encode(settings: GuildBotSettings) -> dict[str, Any]:
         return {
@@ -61,6 +82,7 @@ class BotSettingsRepository:
             "summary_channel_id": settings.summary_channel_id,
             "player_role_id": settings.player_role_id,
             "referee_role_id": settings.referee_role_id,
+            "log_channel_id": settings.log_channel_id,
         }
 
     @staticmethod
@@ -71,6 +93,7 @@ class BotSettingsRepository:
             summary_channel_id=_maybe_int(doc.get("summary_channel_id")),
             player_role_id=_maybe_int(doc.get("player_role_id")),
             referee_role_id=_maybe_int(doc.get("referee_role_id")),
+            log_channel_id=_maybe_int(doc.get("log_channel_id")),
         )
 
 

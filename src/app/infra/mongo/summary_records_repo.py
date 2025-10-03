@@ -66,6 +66,15 @@ class SummaryRecordsRepository:
             return None
         return document_to_record(cast(Mapping[str, Any], doc))
 
+    async def list_by_quest_id(self, quest_id: str) -> list[AdventureSummaryRecord]:
+        cursor = self._collection.find({"quest_id": quest_id}).sort(
+            "created_at", ASCENDING
+        )
+        records: list[AdventureSummaryRecord] = []
+        async for doc in cursor:
+            records.append(document_to_record(cast(Mapping[str, Any], doc)))
+        return records
+
     async def mark_cancelled(self, key: DiscordMessageKey) -> bool:
         now = datetime.now(timezone.utc)
         result = await self._collection.update_one(

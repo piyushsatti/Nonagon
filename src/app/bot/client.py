@@ -1,25 +1,38 @@
 from __future__ import annotations
 
+import importlib
+import inspect
 import logging
-from typing import Sequence
+import sys
+from dataclasses import dataclass
+from typing import Iterable, Sequence
 
 import discord
 from discord.ext import commands
 
-from .cogs.adventure_summary_ingestion import AdventureSummaryIngestionCog
-from .cogs.bot_setup import BotSetupCog
-from .cogs.character_commands import CharacterCommandsCog
-from .cogs.general import GeneralCog
-from .cogs.quest_ingestion import QuestIngestionCog
-from .cogs.role_management import RoleManagementCog
-from .cogs.user_provisioning import UserProvisioningCog
 from .config import DiscordBotConfig, build_default_intents
 from .services.adventure_summary_ingestion import AdventureSummaryIngestionService
 from .services.bot_settings import BotSettingsService
 from .services.character_creation import CharacterCreationService
+from .services.guild_logging import GuildLoggingService
 from .services.quest_ingestion import QuestIngestionService
+from .services.quest_lookup import QuestLookupService
 from .services.role_management import RoleManagementService
 from .services.user_provisioning import UserProvisioningService
+
+
+@dataclass(frozen=True)
+class CogSpec:
+    key: str
+    module: str
+    class_name: str
+
+
+@dataclass(slots=True)
+class CogReloadResult:
+    key: str
+    status: str
+    detail: str | None = None
 
 
 class IngestionBot(commands.Bot):
@@ -32,6 +45,8 @@ class IngestionBot(commands.Bot):
         role_service: RoleManagementService,
         character_service: CharacterCreationService,
         settings_service: BotSettingsService,
+        logging_service: GuildLoggingService,
+        lookup_service: QuestLookupService,
     ) -> None:
         intents = build_default_intents()
         super().__init__(
@@ -45,27 +60,46 @@ class IngestionBot(commands.Bot):
         self._role_service = role_service
         self._character_service = character_service
         self._settings_service = settings_service
+        self._logging_service = logging_service
+        self._lookup_service = lookup_service
+        self._synced_guilds: set[int] = set()
         self._log = logging.getLogger(__name__)
+        specs: tuple[CogSpec, ...] = (
+            CogSpec("general", "app.bot.cogs.general", "GeneralCog"),
+            CogSpec("bot-setup", "app.bot.cogs.bot_setup", "BotSetupCog"),
+            CogSpec(
+                "user-provisioning",
+                "app.bot.cogs.user_provisioning",
+                "UserProvisioningCog",
+            ),
+            CogSpec(
+                "character-commands",
+                "app.bot.cogs.character_commands",
+                "CharacterCommandsCog",
+            ),
+            CogSpec(
+                "quest-ingestion",
+                "app.bot.cogs.quest_ingestion",
+                "QuestIngestionCog",
+            ),
+            CogSpec(
+                "summary-ingestion",
+                "app.bot.cogs.adventure_summary_ingestion",
+                "AdventureSummaryIngestionCog",
+            ),
+            CogSpec(
+                "role-management",
+                "app.bot.cogs.role_management",
+                "RoleManagementCog",
+            ),
+        )
+        self._cog_specs = {spec.key: spec for spec in specs}
+        self._cog_order = tuple(spec.key for spec in specs)
 
     async def setup_hook(self) -> None:
         """Register cogs and sync application commands."""
-        await self.add_cog(GeneralCog(self))
-        await self.add_cog(
-            BotSetupCog(
-                self,
-                config=self._config,
-                settings_service=self._settings_service,
-            )
-        )
-        await self.add_cog(UserProvisioningCog(service=self._user_service))
-        await self.add_cog(
-            CharacterCommandsCog(service=self._character_service, config=self._config)
-        )
-        await self.add_cog(QuestIngestionCog(service=self._quest_service))
-        await self.add_cog(AdventureSummaryIngestionCog(service=self._summary_service))
-        await self.add_cog(
-            RoleManagementCog(service=self._role_service, config=self._config)
-        )
+        self._logging_service.attach_bot(self)
+        await self._load_all_cogs()
         # Ensure guild settings exist before syncing commands.
         # This is necessary because syncing application commands may rely on guild-specific configuration,
         # and missing settings could cause errors or incomplete command registration.
@@ -91,6 +125,21 @@ class IngestionBot(commands.Bot):
         else:
             self._log.warning("Bot ready event fired but bot user is None")
             await self.close()
+            return
+
+        for guild in self.guilds:
+            if guild.id in self._synced_guilds:
+                continue
+            try:
+                await self.tree.sync(guild=guild)
+            except Exception as exc:  # pragma: no cover - defensive
+                self._log.warning(
+                    "Failed to sync application commands for guild",
+                    exc_info=exc,
+                    extra={"scope": "guild", "guild_id": guild.id},
+                )
+            else:
+                self._synced_guilds.add(guild.id)
 
     async def _sync_app_commands(self) -> None:
         """Sync application commands against Discord."""
@@ -133,6 +182,130 @@ class IngestionBot(commands.Bot):
                 names.append("<unknown>")
         return sorted(names)
 
+    async def reload_cogs(
+        self, targets: Sequence[str] | None = None
+    ) -> list[CogReloadResult]:
+        """Reload selected cogs in-place without restarting the bot."""
+        normalized = self._normalize_targets(targets)
+        results: list[CogReloadResult] = []
+        changed = False
+        for key in normalized:
+            spec = self._cog_specs.get(key)
+            if spec is None:
+                results.append(
+                    CogReloadResult(
+                        key=key,
+                        status="unknown",
+                        detail="No cog registered with this name.",
+                    )
+                )
+                continue
+            try:
+                await self._reload_single_cog(spec)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                self._log.exception("Failed to reload cog", extra={"cog": key})
+                detail = str(exc)
+                if len(detail) > 300:
+                    detail = detail[:297] + "…"
+                results.append(CogReloadResult(key=key, status="error", detail=detail))
+            else:
+                changed = True
+                results.append(CogReloadResult(key=key, status="ok", detail="Reloaded"))
+        if changed:
+            await self._sync_app_commands()
+        return results
+
+    def list_cogs(self) -> tuple[str, ...]:
+        return self._cog_order
+
+    def _normalize_targets(self, targets: Sequence[str] | None) -> Iterable[str]:
+        if not targets:
+            return self._cog_order
+        expanded: list[str] = []
+        for token in targets:
+            token = token.strip()
+            if not token:
+                continue
+            lowered = token.lower()
+            if lowered in {"all", "*"}:
+                expanded.extend(self._cog_order)
+                continue
+            expanded.append(lowered)
+        if not expanded:
+            return self._cog_order
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for key in expanded:
+            if key not in seen:
+                seen.add(key)
+                ordered.append(key)
+        return ordered
+
+    async def _load_all_cogs(self) -> None:
+        for key in self._cog_order:
+            spec = self._cog_specs[key]
+            await self._load_cog(spec)
+
+    async def _reload_single_cog(self, spec: CogSpec) -> None:
+        cog_name = spec.class_name
+        existing = self.get_cog(cog_name)
+        if existing is not None:
+            removal = self.remove_cog(cog_name)
+            if inspect.isawaitable(removal):  # pragma: no cover - defensive for stubs
+                await removal
+            self._log.debug("Removed cog before reload", extra={"cog": spec.key})
+        module = self._import_cog_module(spec, reload_module=True)
+        cog = self._construct_cog(spec, module)
+        await self.add_cog(cog, override=True)
+
+    async def _load_cog(self, spec: CogSpec) -> None:
+        module = self._import_cog_module(spec, reload_module=False)
+        cog = self._construct_cog(spec, module)
+        await self.add_cog(cog)
+
+    def _import_cog_module(self, spec: CogSpec, *, reload_module: bool) -> object:
+        if reload_module and spec.module in sys.modules:
+            return importlib.reload(sys.modules[spec.module])
+        return importlib.import_module(spec.module)
+
+    def _construct_cog(self, spec: CogSpec, module: object) -> commands.Cog:
+        cog_cls = getattr(module, spec.class_name)
+        kwargs = self._cog_kwargs(spec.key)
+        return cog_cls(**kwargs)
+
+    def _cog_kwargs(self, key: str) -> dict[str, object]:
+        if key == "general":
+            return {
+                "bot": self,
+                "logging_service": self._logging_service,
+                "lookup_service": self._lookup_service,
+            }
+        if key == "bot-setup":
+            return {
+                "bot": self,
+                "config": self._config,
+                "settings_service": self._settings_service,
+                "logging_service": self._logging_service,
+            }
+        if key == "user-provisioning":
+            return {"service": self._user_service}
+        if key == "character-commands":
+            return {
+                "service": self._character_service,
+                "config": self._config,
+            }
+        if key == "quest-ingestion":
+            return {"service": self._quest_service}
+        if key == "summary-ingestion":
+            return {"service": self._summary_service}
+        if key == "role-management":
+            return {
+                "service": self._role_service,
+                "config": self._config,
+                "logging_service": self._logging_service,
+            }
+        raise ValueError(f"Unsupported cog key: {key}")
+
 
 def build_bot(
     config: DiscordBotConfig,
@@ -142,6 +315,8 @@ def build_bot(
     role_service: RoleManagementService,
     character_service: CharacterCreationService,
     settings_service: BotSettingsService,
+    logging_service: GuildLoggingService,
+    lookup_service: QuestLookupService,
 ) -> IngestionBot:
     return IngestionBot(
         config,
@@ -151,4 +326,6 @@ def build_bot(
         role_service,
         character_service,
         settings_service,
+        logging_service,
+        lookup_service,
     )

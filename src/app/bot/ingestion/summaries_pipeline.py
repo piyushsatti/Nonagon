@@ -20,6 +20,8 @@ from app.domain.models.summary.SummaryModel import (
     validate_adventure_summary,
 )
 
+from .links import DiscordMessageKey
+
 TITLE_PATTERN = re.compile(r"^#\s*(?P<title>.+)$", re.MULTILINE)
 FIELD_PATTERN = re.compile(r"^\*\*(?P<field>[^*]+)\*\*:\s*(?P<value>.+)$", re.MULTILINE)
 SECTION_PATTERN = re.compile(
@@ -29,6 +31,10 @@ SECTION_PATTERN = re.compile(
 MENTION_PATTERN = re.compile(r"<@!?(?P<id>\d+)>")
 URL_PATTERN = re.compile(r"https?://\S+", re.IGNORECASE)
 QUEST_ID_PATTERN = re.compile(r"QUES\d{4,}")
+DISCORD_LINK_PATTERN = re.compile(
+    r"https://discord(?:app)?\.com/channels/(?P<guild_id>\d+)/(?P<channel_id>\d+)/(?P<message_id>\d+)",
+    re.IGNORECASE,
+)
 SUMMARY_KIND_PATTERN = re.compile(r"player|referee", re.IGNORECASE)
 BOOLEAN_TRUE = {"yes", "y", "true", "1"}
 
@@ -58,7 +64,7 @@ class ParsedParticipant:
 
 @dataclass(slots=True)
 class ParsedAdventureSummary:
-    quest_id: str
+    quest_id: str | None
     guild_id: str
     channel_id: str
     message_id: str
@@ -78,6 +84,7 @@ class ParsedAdventureSummary:
     in_character: bool
     created_at: datetime
     edited_at: datetime | None
+    quest_message_ref: DiscordMessageKey | None
 
 
 @dataclass(slots=True)
@@ -120,7 +127,7 @@ def _new_participant_record_list() -> list["SummaryParticipantRecord"]:
 
 class AdventureSummaryRecord(BaseModel):
     summary_id: str = Field(..., description="Human-readable summary identifier")
-    quest_id: str
+    quest_id: str | None = None
     kind: SummaryKind
     author_user_id: str | None = None
     author_discord_id: str | None = None
@@ -177,11 +184,16 @@ def parse_message(
     sections = _parse_sections(raw)
 
     quest_id_value = metadata.get("quest id") or _search_first(QUEST_ID_PATTERN, raw)
-    errors: list[str] = []
-    if not quest_id_value:
-        errors.append("Missing quest identifier (expected '**Quest ID:** QUES1234')")
-    else:
-        quest_id_value = quest_id_value.strip().upper()
+    quest_id_value = quest_id_value.strip().upper() if quest_id_value else None
+
+    quest_link_value = (
+        metadata.get("link to quest")
+        or metadata.get("quest link")
+        or metadata.get("linked quest")
+    )
+    quest_message_ref = _extract_discord_reference(quest_link_value)
+    if quest_message_ref is None:
+        quest_message_ref = _extract_discord_reference_from_links(raw)
 
     title_match = TITLE_PATTERN.search(raw)
     title = title_match.group("title").strip() if title_match else None
@@ -215,11 +227,8 @@ def parse_message(
     if in_character_text:
         in_character = in_character_text.strip().lower() in BOOLEAN_TRUE
 
-    if errors:
-        raise SummaryParseError(errors)
-
     return ParsedAdventureSummary(
-        quest_id=quest_id_value or "",
+        quest_id=quest_id_value,
         guild_id=str(guild_id),
         channel_id=str(channel_id),
         message_id=str(message_id),
@@ -241,6 +250,7 @@ def parse_message(
         in_character=in_character,
         created_at=_ensure_timezone(created_at),
         edited_at=_ensure_timezone(edited_at) if edited_at else None,
+        quest_message_ref=quest_message_ref,
     )
 
 
@@ -254,6 +264,9 @@ def map_parsed_to_domain(
     author_character_id: str | None = None,
     existing: AdventureSummaryRecord | None = None,
 ) -> AdventureSummary:
+    if not parsed.quest_id:
+        raise ValueError("Parsed summary is missing quest identifier")
+
     quest_id = QuestID.parse(parsed.quest_id)
     summary_id_obj = SummaryID.parse(summary_id)
 
@@ -486,6 +499,32 @@ def _extract_first_mention(value: str | None) -> str | None:
 def _search_first(pattern: re.Pattern[str], raw: str) -> str | None:
     match = pattern.search(raw)
     return match.group(0) if match else None
+
+
+def _extract_discord_reference(value: str | None) -> DiscordMessageKey | None:
+    if not value:
+        return None
+    cleaned = value.strip()
+    match = DISCORD_LINK_PATTERN.search(cleaned)
+    if not match:
+        return None
+    return DiscordMessageKey(
+        guild_id=match.group("guild_id"),
+        channel_id=match.group("channel_id"),
+        message_id=match.group("message_id"),
+    )
+
+
+def _extract_discord_reference_from_links(raw: str) -> DiscordMessageKey | None:
+    for link in _extract_links(raw):
+        match = DISCORD_LINK_PATTERN.search(link)
+        if match:
+            return DiscordMessageKey(
+                guild_id=match.group("guild_id"),
+                channel_id=match.group("channel_id"),
+                message_id=match.group("message_id"),
+            )
+    return None
 
 
 def _parse_kind(value: str | None) -> SummaryKind | None:

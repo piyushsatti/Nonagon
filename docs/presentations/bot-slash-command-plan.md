@@ -35,7 +35,7 @@
 ## Demo Flow (5–7 minutes)
 
 1. **Setup** (60s)
-   - Show `.env` keys (`DISCORD_GUILD_ID`, `DISCORD_TOKEN`).
+   - Show exported env vars (`DISCORD_GUILD_ID`, `DISCORD_TOKEN`).
    - Start bot container (`docker compose up bot`).
 2. **Symptom Reproduction** (60s)
    - Open Discord slash menu before fix—highlight missing `bot-setup`.

@@ -56,15 +56,17 @@ All cogs defer within three seconds, call the relevant use cases (shared with th
 * MongoDB 6.x running locally or through Docker (the repo ships with `docker-compose.dev.yml`).
 * An OAuth2 bot invite URL with the `bot` and `applications.commands` scopes so slash commands register.
 
-### Step 2 – Create environment configuration
+### Step 2 – Provide environment variables
 
-* Copy `.env.example` if you already maintain one, or create a new `.env` at the repository root.
-* Minimum variables:
-  * `DISCORD_TOKEN` (or `BOT_TOKEN`): Discord bot token.
-  * `DISCORD_GUILD_ID` (or `GUILD_ID`): Primary guild to bootstrap.
-  * `MONGODB_URI`, `DB_NAME`: Mongo connection information (`mongodb://localhost:27017` works for local dev).
-  * `API_ADMIN_TOKEN`: Shared secret used by both the bot and the FastAPI admin routes.
-  * Optional overrides read at launch: `QUEST_CHANNEL_ID`, `SUMMARY_CHANNEL_ID`, `PLAYER_ROLE_ID`, `REFEREE_ROLE_ID`, `LOG_LEVEL`.
+Define the runtime configuration through environment variables (export them in your shell, inject them via CI, or supply an env file directly to Docker Compose). Minimum variables:
+
+* `DISCORD_TOKEN` (or `BOT_TOKEN`): Discord bot token.
+* `DISCORD_GUILD_ID` (or `GUILD_ID`): Primary guild to bootstrap.
+* `MONGODB_URI`, `DB_NAME`: Mongo connection information (`mongodb://localhost:27017` works for local dev).
+* `API_ADMIN_TOKEN`: Shared secret used by both the bot and the FastAPI admin routes.
+* Optional overrides read at launch: `QUEST_CHANNEL_ID`, `SUMMARY_CHANNEL_ID`, `PLAYER_ROLE_ID`, `REFEREE_ROLE_ID`, `LOG_LEVEL`.
+
+> **Local convenience:** If `DISCORD_TOKEN` isn’t exported, the bot will read it from a `.env` file at the repository root. Other identifiers (guild IDs, channel IDs, role IDs) are not loaded from `.env` to avoid stale configuration—provide them through environment variables or the `/bot-setup` flow instead.
 
 ### Step 3 – Install dependencies
 

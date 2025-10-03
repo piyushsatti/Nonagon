@@ -4,19 +4,22 @@ import asyncio
 import logging
 
 from app.bot.client import build_bot
-from app.bot.config import load_config
+from app.bot.config import DEFAULT_TEST_GUILD_ID, load_config
 from app.bot.services.adventure_summary_ingestion import (
     AdventureSummaryIngestionService,
 )
 from app.bot.services.bot_settings import BotSettingsService
 from app.bot.services.character_creation import CharacterCreationService
+from app.bot.services.guild_logging import GuildLoggingService
 from app.bot.services.quest_ingestion import QuestIngestionService
+from app.bot.services.quest_lookup import QuestLookupService
 from app.bot.services.role_management import RoleManagementService
 from app.bot.services.user_provisioning import UserProvisioningService
 from app.infra.db import close_client, get_db
 from app.infra.ids.service import MongoIdService
 from app.infra.mongo.bot_settings_repo import BotSettingsRepository
 from app.infra.mongo.characters_repo import CharactersRepoMongo
+from app.infra.mongo.ingest_failures_repo import IngestFailureRepository
 from app.infra.mongo.quest_records_repo import QuestRecordsRepository
 from app.infra.mongo.summary_records_repo import SummaryRecordsRepository
 from app.infra.mongo.users_repo import UsersRepoMongo
@@ -40,18 +43,37 @@ async def bootstrap() -> None:
     bot_settings_repo = BotSettingsRepository(db)
     await bot_settings_repo.ensure_indexes()
 
+    if config.guild_id is None:
+        stored_guilds = await bot_settings_repo.list_guild_ids()
+        if stored_guilds:
+            config.guild_id = stored_guilds[0]
+        else:
+            config.guild_id = DEFAULT_TEST_GUILD_ID
+
     quest_repo = QuestRecordsRepository(db)
     await quest_repo.ensure_indexes()
 
     summary_repo = SummaryRecordsRepository(db)
     await summary_repo.ensure_indexes()
 
+    ingest_failure_repo = IngestFailureRepository(db)
+    await ingest_failure_repo.ensure_indexes()
+
+    lookup_service = QuestLookupService(
+        quest_repo=quest_repo,
+        summary_repo=summary_repo,
+    )
+
     # Load services
+    logging_service = GuildLoggingService()
+
     quest_service = QuestIngestionService(
         repo=quest_repo,
         id_service=id_service,
         quest_channel_id=config.quest_channel_id,
         referee_role_id=config.referee_role_id,
+        logging_service=logging_service,
+        failure_repo=ingest_failure_repo,
     )
 
     summary_service = AdventureSummaryIngestionService(
@@ -59,6 +81,9 @@ async def bootstrap() -> None:
         id_service=id_service,
         summary_channel_id=config.summary_channel_id,
         referee_role_id=config.referee_role_id,
+        logging_service=logging_service,
+        quest_repo=quest_repo,
+        failure_repo=ingest_failure_repo,
     )
 
     bot_settings_service = BotSettingsService(
@@ -66,6 +91,7 @@ async def bootstrap() -> None:
         config=config,
         quest_service=quest_service,
         summary_service=summary_service,
+        logging_service=logging_service,
     )
 
     user_service = UserProvisioningService(
@@ -93,6 +119,8 @@ async def bootstrap() -> None:
         role_service=role_service,
         character_service=character_service,
         settings_service=bot_settings_service,
+        logging_service=logging_service,
+        lookup_service=lookup_service,
     )
     try:
         await bot.start(config.token)

@@ -72,7 +72,7 @@ Nonagon automates quest workflows (announce >> sign‑ups >> roster selection >>
 ### 3.5 Adapters (Infra)
 
 * **MongoDB repositories:** implement ports for `UsersRepo`, `QuestsRepo`, `SummariesRepo`.
-* **Config:** environment‑driven (`.env` in dev); no secrets in code.
+* **Config:** environment-driven (exported variables, Docker secrets); no secrets in code.
 * **Background jobs (optional):** projectors to compute analytics/materialized views.
 
 ---
@@ -160,7 +160,7 @@ Nonagon automates quest workflows (announce >> sign‑ups >> roster selection >>
 ## 9. Deployment & Config
 
 * **Packaging:** `src/` layout; every package has `__init__.py`.
-* **Configuration:** env vars (e.g., `MONGODB_URI`, `BOT_TOKEN`, `LOG_LEVEL`). Commit only `.env.example`.
+* **Configuration:** env vars (e.g., `MONGODB_URI`, `BOT_TOKEN`, `LOG_LEVEL`). Provide sample values through documentation, not committed secrets.
 * **Container:** Dockerfile at repo root; `.dockerignore` excludes venv, tests, docs, git.
 * **CI:** GitHub Actions runs `ruff`/`pytest` and optional image build.
 

@@ -7,16 +7,21 @@ import discord
 
 from ..ingestion import (
     DiscordMessageKey,
+    ParsedQuest,
     ParseError,
     ValidationError,
     map_parsed_to_record,
     parse_message,
     validate,
 )
+from ..ingestion.failures import IngestFailureRecord
 
 if TYPE_CHECKING:  # pragma: no cover - type checking only
     from app.infra.ids.service import IdService
+    from app.infra.mongo.ingest_failures_repo import IngestFailureRepository
     from app.infra.mongo.quest_records_repo import QuestRecordsRepository
+
+from .guild_logging import GuildLoggingService
 
 
 class QuestIngestionService:
@@ -30,12 +35,16 @@ class QuestIngestionService:
         quest_channel_id: int | None,
         referee_role_id: int | None,
         logger: logging.Logger | None = None,
+        logging_service: GuildLoggingService | None = None,
+        failure_repo: IngestFailureRepository | None = None,
     ) -> None:
         self._repo = repo
         self._id_service = id_service
         self._quest_channel_id = quest_channel_id
         self._referee_role_id = referee_role_id
         self._log = logger or logging.getLogger(__name__)
+        self._logging_service = logging_service
+        self._failure_repo = failure_repo
 
     def update_configuration(
         self,
@@ -55,6 +64,16 @@ class QuestIngestionService:
         guild = message.guild
         assert guild is not None
         key = DiscordMessageKey.from_ids(guild.id, message.channel.id, message.id)
+        self._log.info(
+            "Quest message detected",
+            extra={
+                "guild_id": key.guild_id,
+                "channel_id": key.channel_id,
+                "message_id": key.message_id,
+                "author_id": message.author.id,
+            },
+        )
+        parsed: ParsedQuest | None = None
         try:
             parsed = parse_message(
                 raw=message.content,
@@ -73,6 +92,19 @@ class QuestIngestionService:
                     "message_id": key.message_id,
                 },
             )
+            if self._failure_repo:
+                await self._failure_repo.record_failure(
+                    IngestFailureRecord(
+                        kind="quest",
+                        guild_id=key.guild_id,
+                        channel_id=key.channel_id,
+                        message_id=key.message_id,
+                        author_id=str(message.author.id),
+                        raw_content=message.content,
+                        reason="parse_error",
+                        errors=exc.errors,
+                    )
+                )
             return
         except ValidationError as exc:
             self._log.warning(
@@ -83,6 +115,26 @@ class QuestIngestionService:
                     "message_id": key.message_id,
                 },
             )
+            if self._failure_repo and parsed is not None:
+                metadata = {
+                    "title": parsed.title,
+                    "region_name": parsed.region_name,
+                    "event_url": parsed.event_url,
+                    "my_table_url": parsed.my_table_url,
+                }
+                await self._failure_repo.record_failure(
+                    IngestFailureRecord(
+                        kind="quest",
+                        guild_id=key.guild_id,
+                        channel_id=key.channel_id,
+                        message_id=key.message_id,
+                        author_id=str(message.author.id),
+                        raw_content=message.content,
+                        reason="validation_error",
+                        errors=[issue.message for issue in exc.issues],
+                        metadata=metadata,
+                    )
+                )
             return
 
         existing = await self._repo.get_by_discord_message(key)
@@ -116,6 +168,25 @@ class QuestIngestionService:
                 "message_id": key.message_id,
             },
         )
+        if message.guild and self._logging_service:
+            await self._logging_service.log_event(
+                message.guild.id,
+                title=f"Quest {action}",
+                description=record.title,
+                fields=[
+                    ("Quest ID", record.quest_id),
+                    ("Channel", f"<#{key.channel_id}>"),
+                    (
+                        "Message",
+                        f"https://discord.com/channels/{key.guild_id}/{key.channel_id}/{key.message_id}",
+                    ),
+                ],
+                extra={
+                    "quest_id": record.quest_id,
+                    "channel_id": key.channel_id,
+                    "message_id": key.message_id,
+                },
+            )
 
     async def ingest_edited_message(
         self, before: discord.Message, after: discord.Message
@@ -137,6 +208,22 @@ class QuestIngestionService:
                     "message_id": key.message_id,
                 },
             )
+            if self._logging_service:
+                await self._logging_service.log_event(
+                    guild_id,
+                    title="Quest cancelled",
+                    fields=[
+                        ("Channel", f"<#{key.channel_id}>"),
+                        (
+                            "Message",
+                            f"https://discord.com/channels/{guild_id}/{key.channel_id}/{key.message_id}",
+                        ),
+                    ],
+                    extra={
+                        "channel_id": key.channel_id,
+                        "message_id": key.message_id,
+                    },
+                )
 
     def _should_process(self, message: discord.Message) -> bool:
         if message.guild is None:
@@ -147,23 +234,4 @@ class QuestIngestionService:
             return False
         if message.channel.id != self._quest_channel_id:
             return False
-        if not self._has_referee_role(message.author):
-            self._log.debug(
-                "Skipping message: missing referee role",
-                extra={
-                    "author_id": message.author.id,
-                    "channel_id": message.channel.id,
-                    "message_id": message.id,
-                },
-            )
-            return False
         return True
-
-    def _has_referee_role(self, member: discord.abc.Snowflake) -> bool:
-        if self._referee_role_id is None:
-            return True
-        roles = getattr(member, "roles", [])
-        for role in roles:
-            if getattr(role, "id", None) == self._referee_role_id:
-                return True
-        return False

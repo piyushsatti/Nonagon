@@ -21,8 +21,6 @@ from app.infra.mongo.users_repo import UsersRepoMongo
 
 # Load test-specific environment configuration if available.
 load_dotenv(".env.test")
-# Allow fallback to the default .env without overriding explicit test overrides.
-load_dotenv(override=False)
 
 TEST_MONGODB_URI = os.getenv(
     "TEST_MONGODB_URI",
@@ -104,7 +102,7 @@ async def clean_database(
 async def api_client() -> AsyncIterator[Any]:
     from httpx import ASGITransport, AsyncClient  # type: ignore[import]
 
-    transport: Any = ASGITransport(app=app) # type: ignore[import]
+    transport: Any = ASGITransport(app=app)  # type: ignore[import]
     async with AsyncClient(transport=transport, base_url="http://test") as client:  # type: ignore[reportUnknownVariableType]
         yield client
 
