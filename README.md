@@ -1,169 +1,188 @@
-# Big Brother
+# Nonagon
 
-- Designed and deployed an end-to-end community platform for D&D players—combining a modular Discord bot, a Flask web dashboard, and REST APIs to automate quest scheduling and analytics.
-- Implemented quest lifecycle tracking, character XP/GP calculators, and real-time churn alerts; persisted data in MongoDB and served analytics through FastAPI endpoints.
-- Containerised the bot and API with Docker, automated CI/CD via GitHub Actions, and achieved 80% pytest coverage.
+> Discord-native quest automation, analytics, and storytelling for tabletop communities.
 
-## Tools Used
+Nonagon is a full-stack platform that keeps a living tabletop RPG community humming. It pairs a battle-tested Discord bot with a FastAPI service and Mongo-backed data layer to automate quest lifecycles, orchestrate player sign-ups, capture adventure summaries, and surface participation insights. The project demonstrates end-to-end product thinking—from UX in slash commands to resilient infrastructure and documentation—and is actively shipping features for a live server.
 
-- [Discord.py](https://discordpy.readthedocs.io/en/stable/)
-- [Redis](https://redis.io/)
-- [MongoDB](https://www.mongodb.com/docs/mongodb-shell/)
+---
 
-## Configuration
+## 🔍 TL;DR / Why it matters
 
-Set the following environment variables before starting the bot (export them in your shell, CI system, or Docker secrets manager):
+- **Automates the hard parts of community ops** so referees can focus on storytelling: quest announcements, roster selection, adventure recap tracking, and role management.
+- **Backed by a hexagonal architecture** that keeps domain rules independent of Discord or HTTP frameworks, enabling rapid iteration and future integrations (web, analytics dashboards).
+- **Production-ready craftsmanship**: structured logging, CI/CD via Docker + GitHub Actions, deterministic ID services, environment-driven configuration, and a growing test suite.
 
-- `DISCORD_TOKEN` – bot token from the Discord developer portal.
-- `QUEST_CHANNEL_ID` – channel ID for quest announcements to ingest.
-- `SUMMARY_CHANNEL_ID` – channel ID where adventure summaries are posted.
-- `PLAYER_ROLE_ID` – Discord role ID granted to players allowed to join quests and create characters.
-- `REFEREE_ROLE_ID` – Discord role ID used to identify referees/DMs.
-- `MONGODB_URI` – connection string for the MongoDB deployment.
-- `API_ADMIN_TOKEN` – shared secret used by the FastAPI admin endpoints.
+---
 
-Example session setup:
+## ✨ Feature Highlights
 
-```bash
-export DISCORD_TOKEN="<discord bot token>"
-export MONGODB_URI="mongodb+srv://..."
-export API_ADMIN_TOKEN="<shared admin token>"
+| Pillar | What it delivers |
+| --- | --- |
+| **Quest Automation** | Discord ingestion parses quest announcements, normalizes metadata, persists records, and exposes `/quest-info quest` lookups with rich embeds. |
+| **Summary Intelligence** | Adventure summary ingestion maps Markdown posts (player + DM) into structured documents, links them to quests, and exposes `/quest-info summary` retrieval. |
+| **Admin & Operations Toolkit** | Slash commands manage player/referee roles, bootstrap guild configuration from Mongo, and log every action with contextual telemetry. |
+| **FastAPI Gateway** | REST `/v1/**` endpoints wrap the same use cases for external tooling—perfect for dashboards, Postman collections, or web front-ends. |
+| **Reliable Startup & Sync** | Bot bootstrap discovers guild IDs from Mongo (with a default test guild `1372610481860120638`), ensures command sync completes, and logs results for auditability. |
+| **Documentation-first Delivery** | Architecture, API, bot operations, and PRDs live in `docs/`, making knowledge transfer painless for collaborators or recruiters. |
+
+> See `docs/BOT.md` and `docs/API.md` for deep-dives into command UX, payloads, and contract details.
+
+---
+
+## 🏗 Architecture at a Glance
+
+```text
+[ Discord Slash Commands ]     [ FastAPI /v1 REST ]
+            |                             |
+       Cogs & Views (UI)           Routers & Schemas
+            \____________________________/
+                        |
+                Application Use Cases
+                        |
+                  Domain Models/IDs
+                        |
+             MongoDB Repositories & Services
+                        |
+             Motor (Async Mongo) + Infrastructure
 ```
 
-For local development you can also store the Discord token in a `.env` file at the project root; the bot will read it automatically if the environment variable is missing. Other guild/channel configuration still comes from real environment variables or the in-bot setup commands.
+- **Style**: Hexagonal (Ports & Adapters) with thin delivery edges for Discord and HTTP.
+- **Key Services**: `QuestIngestionService`, `AdventureSummaryIngestionService`, `QuestLookupService`, and use cases like `CreateQuest`, `AddPlayerSignup`, `ListSummaries`.
+- **Observability**: Structured logging via `GuildLoggingService`, Mongo startup health checks, and failure repositories for ingestion triage.
 
-Install dev dependencies with `pip install -e .[dev]`, then run the API suite: `pytest tests/api`.
+📄 Detailed write-up: `docs/architecture.md`
 
-> **Testing defaults:** the pytest fixtures automatically read `.env.test` for isolated Mongo/Test tokens so you can keep runtime secrets out of source control.
+---
 
-> **Docker note:** the API and bot containers now trust system certificate authorities (`ca-certificates`) so they can establish TLS connections to Atlas without extra configuration. Pass secrets in with `docker compose --env-file` or environment exports; the containers no longer read from `.env` automatically.
+## 🧰 Tech Stack & Tooling
 
-> **Health check note:** the FastAPI app performs a MongoDB ping during startup—if the connection string is invalid or the cluster is unreachable, the container will exit immediately with a descriptive error.
+- **Language & Runtime**: Python 3.13, asyncio-first.
+- **Discord Bot Framework**: [`discord.py`](https://discordpy.readthedocs.io/)
+- **API Framework**: [FastAPI](https://fastapi.tiangolo.com/) + Pydantic models.
+- **Database**: MongoDB Atlas via async Motor client; sequential ID service for deterministic identifiers.
+- **Build & Packaging**: `pyproject.toml` (setuptools), editable installs for dev, Dockerfiles for API and bot workloads.
+- **CI/CD**: GitHub Actions (lint + pytest), Docker Compose for reproducible local stacks.
+- **Testing**: Pytest suites under `tests/` covering API endpoints, bot cogs, ingestion pipelines, and domain models.
+- **Documentation**: Markdown knowledge base under `docs/` (PRD, architecture, API, bot runbooks, presentations).
 
-The pytest fixtures read `.env.test`, so you can override the Mongo URI, database name, or admin token for tests without changing your runtime environment.
+---
 
-### Local development without Docker
+## 📂 Repository Tour
 
-If you prefer to run the services directly, use the helper script `scripts/run-local.sh`:
-
-```bash
-chmod +x scripts/run-local.sh  # one-time setup
-
-# Start both FastAPI (background) and the Discord bot (foreground)
-./scripts/run-local.sh
-
-# Or run a single component
-./scripts/run-local.sh api
-./scripts/run-local.sh bot
+```text
+src/
+  app/
+    bot/        # Discord client, cogs, ingestion & services
+    api/        # FastAPI routers, schemas, dependency wiring
+    domain/     # Entities, value objects, and use-case orchestrators
+    infra/      # Mongo adapters, settings, lifecycle hooks, ID service
+  ...
+docs/
+  architecture.md
+  API.md
+  BOT.md
+  PRD.md
+Dockerfile.api / Dockerfile.bot
+pytest.ini
+pyproject.toml
 ```
 
-The script automatically loads the first available dotenv file (`.env.local` or `.env`) unless you explicitly pass `ENV_FILE=/path/to/file`. Make sure at least these environment variables are defined before launching:
+---
 
-- `MONGODB_URI`
-- `DB_NAME` (optional, defaults to `nonagon`)
-- `API_ADMIN_TOKEN` (for protected API routes)
-- `DISCORD_TOKEN`, `DISCORD_GUILD_ID`, `QUEST_CHANNEL_ID`, `SUMMARY_CHANNEL_ID`, `REFEREE_ROLE_ID`, `LOG_CHANNEL_ID` (bot only)
+## 🚀 Getting Started
 
-Logs are written to the `logs/` directory while still streaming to the terminal.
+### 1. Clone & install
 
-### Discord bot features
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .[dev]
+```
 
-- **Startup user sync**: when the bot comes online it provisions a domain `User` record for every non-bot guild member automatically.
-- **Role management (admin only)**
-  - `/player-grant @member` / `/player-revoke @member` – keep player access aligned between Discord roles and the domain model.
-  - `/referee-grant @member` / `/referee-revoke @member` – manage referee privileges and ensure the Discord roles reflect the change.
-- **Character creation (players)**
-  - `/character-create` – lets any member with the player role register a new character (no naming restrictions). The command replies with an embed summarising the new record and useful resource links.
+### 2. Configure environment
 
-All commands return rich embeds with success/error details so moderators can audit changes directly in Discord.
+Create a `.env` (or export directly) with the essentials:
 
-## Discord Bot Development Milestones
+```ini
+DISCORD_TOKEN=xxxx
+MONGODB_URI=mongodb+srv://...
+API_ADMIN_TOKEN=supersecret
+DISCORD_DEFAULT_TEST_GUILD_ID=1372610481860120638
+QUEST_CHANNEL_ID=123456789012345678
+SUMMARY_CHANNEL_ID=123456789012345679
+REFEREE_ROLE_ID=123456789012345680
+PLAYER_ROLE_ID=123456789012345681
+```
 
-### Milestone 0 — Setup & Scaffolding (1–2 days)
+Additional knobs like `DB_NAME`, `LOG_LEVEL`, or TLS overrides live in `app/infra/settings.py`.
 
-- [x] Register bot in Discord Developer Portal
-- [x] Invite bot to test server with correct perms
-- [x] Stack: **Python + discord.py**
-- [ ] Create base bot project (command prefix, cogs / modular folders)
-- [ ] Connect to lightweight DB (SQLite / JSON)
+### 3. Run everything with Docker Compose
 
-> **Success:** `!ping` and `!help` respond; bot logs in without errors.
+```bash
+docker compose -f docker-compose.dev.yml up --build
+```
+
+- Spins up the FastAPI service and Discord bot containers.
+- Performs MongoDB health checks on startup—misconfiguration fails fast with clear logs.
+
+### 4. Run locally without Docker
+
+```bash
+chmod +x scripts/run-local.sh
+./scripts/run-local.sh          # boots API (background) + bot (foreground)
+./scripts/run-local.sh api      # FastAPI only
+./scripts/run-local.sh bot      # Discord bot only
+```
+
+The helper script auto-loads `.env.local` or `.env` unless overridden with `ENV_FILE=/path/to/file`.
 
 ---
 
-### Milestone 1 — Quest Lifecycle Tracking (3–5 days)
+## ✅ Quality Gates & Testing
 
-- [ ] `!createquest <name> <datetime> <dm>` → save quest
-- [ ] `!joinquest <quest_id> <character>` → log participation
-- [ ] `!startquest <quest_id>` → confirm attendees
-- [ ] `!endquest <quest_id> <xp> <gp>` → store rewards
-- [ ] Persist character-quest linkage
+```bash
+python -m pytest
+```
 
-> **Success:** Quests + attendance correctly stored.
+- Bot cog tests: `tests/discord_bot/**`
+- API contract tests: `tests/api/**`
+- Domain model tests: `tests/domain/**`
 
----
-
-### Milestone 2 — Character & Player Profiles (3–4 days)
-
-- [ ] `!character add/view/delete` commands
-- [ ] Auto-update XP / level on quest end
-- [ ] `!myprofile` → show quests, characters, XP, last played
-- [ ] Log historical level-up events
-
-> **Success:** Any player’s progression can be queried.
+CI mirrors the pytest suite and can be extended with linters or type checking (e.g., Ruff, mypy) as needed.
 
 ---
 
-### Milestone 3 — Engagement & Messaging Stats (3–4 days)
+## 📈 Observability & Ops Notes
 
-- [ ] Count messages per user by channel category
-- [ ] Track reactions (given & received)
-- [ ] Update **last-active** date on any event
-- [ ] Log quests-per-DM metric
-
-> **Success:** `!stats` returns engagement summary.
+- Command execution logs include guild/channel/actor context via `GuildLoggingService`.
+- Ingestion failures (parse/validation) are persisted to Mongo so moderators can remediate data issues quickly.
+- Slash command registration is scoped per guild with fallback to `DISCORD_DEFAULT_TEST_GUILD_ID` to avoid Discord-wide sync delays.
+- API endpoints require an `X-Admin-Token` header, enforcing lightweight RBAC for administrative flows.
 
 ---
 
-### Milestone 4 — Admin Tools & Dashboards (4–6 days)
+## 🗺 Roadmap & Future Epics
 
-- [ ] `!leaderboard quests|messages`
-- [ ] `!churncheck` → list users inactive >30 days
-- [ ] `!dmstats` → quests run, unique players
-- [ ] `!questhistory @player` timeline
+Tracked in `docs/PRD.md`:
 
-> **Success:** Moderators can view health metrics in-chat.
-
----
-
-### Milestone 5 — Automation & Feedback Loops (5–7 days)
-
-- [ ] Auto post **level-up** announcements
-- [ ] DM inactivity nudges (3-week threshold)
-- [ ] `!milestonecheck` → next achievements
-- [ ] Post-session reminder for adventure summary bonus
-
-> **Success:** Bot drives engagement with automated nudges.
+- 🟡 **Epic 1 – Data Tracking**: message and quest participation analytics for admins.
+- 🔵 **Epic 4 – Frontend for Quests**: public website leveraging the `/v1` API.
+- 🆕 Future seeds: analytics dashboards, player portal UX refresh, live ops tooling (forced sync, incident recovery).
 
 ---
 
-### Milestone 6 — Web Sync / Export (Optional 7–10 days)
+## 📚 Further Reading & Decks
 
-- [ ] `!exportstats` → JSON / CSV dump
-- [ ] REST endpoint or simple Flask dashboard
-- [ ] Optional OAuth login for player self-stats
+- **Architecture**: `docs/architecture.md`
+- **API Contracts**: `docs/API.md` (summaries, quests, users, admin routes)
+- **Discord Bot Runbook**: `docs/BOT.md` (command catalogue, troubleshooting)
+- **Slash Command Troubleshooting Plan**: `docs/presentations/bot-slash-command-plan.md`
+- **Product Requirements**: `docs/PRD.md`
 
-> **Success:** Data visible outside Discord.
+Screenshots & demo assets live under `docs/media/`.
 
 ---
 
-## Database
+## 👋 About the Author
 
-The project uses MongoDB. Each user, player, referee, and character is stored as a document; collections are scoped per guild.
-
-## To-Do
-
-- [ ] Redo documentation
-- [ ] Make soft architecture for project
-  - [ ] Redis vs local cache
-- [ ] *(add more items as needed)*
+Crafted by **Piyush Satti** — building tools that keep creative communities thriving. I lead projects end-to-end: product discovery, architecture, gameplay UX, and reliable deployments. Reach me at [piyushsatti@gmail.com](mailto:piyushsatti@gmail.com) or on GitHub [@piyushsatti](https://github.com/piyushsatti) for collaboration or opportunities.

@@ -47,20 +47,31 @@ Nonagon automates quest workflows (announce >> sign‑ups >> roster selection >>
 * **Cogs (Controllers):** Register slash commands/listeners, validate permissions, **defer** within 3s, call use cases, then send/edit messages.
 * **Views (UI):** `discord.ui.View` classes own component callbacks; presenters build embeds.
 * **Rate limiting:** centralized wrapper handles retries/backoff when editing messages.
+* **Command → persistence flow:**
+  * Slash commands such as `/quest-info quest` and `/quest-info summary` live in `app/bot/cogs/general.py`; handlers defer the interaction, normalize input, and forward to `QuestLookupService`.
+  * `QuestLookupService` (in `app/bot/services/quest_lookup.py`) resolves identifiers, queries Mongo via `QuestRecordsRepository` / `SummaryRecordsRepository`, and returns domain records plus linked summaries.
+  * Ingestion services (`QuestIngestionService`, `AdventureSummaryIngestionService`) and the admin `/bot-setup` flow persist quest and summary messages through the same repositories, ensuring that subsequent lookups hit fresh data.
+  * Structured command logging (`GuildLoggingService.log_event`) records guild/channel/actor context for auditing and troubleshooting.
 
 ### 3.2 Application (Use Cases)
 
-* One file per action; no framework imports. Examples:
-
-  * `create_quest`, `announce_quest`, `apply_for_quest`, `select_roster`, `mark_completed`
-  * `submit_summary` (DM or player), `list_summaries`
-  * `record_message_activity`, `record_event_attendance`
+* One module per action under `app/domain/usecase/**` with no framework imports; each class exposes an `execute` coroutine that coordinates repositories and entities.
+* Quest lifecycle:
+  * `CreateQuest`, `GetQuest`, `UpdateQuestDetails`, `DeleteQuest` (see `app/domain/usecase/quests/*.py`).
+  * Signup orchestration (`AddPlayerSignup`, `RemovePlayerSignup`, `SelectPlayerSignup`, `CloseQuestSignups`) persists roster changes through `QuestsRepo` and validates users via `UsersRepo`/`CharactersRepo`.
+  * Status transitions (`MarkQuestCompleted`, `MarkQuestCancelled`, `MarkQuestAnnounced`) call the corresponding entity helpers before re-saving.
+* Summary workflows (`app/domain/usecase/summaries/**`): `CreateSummary`, `UpdateSummary`, and `ListSummaries` enforce content invariants and fan out to summary repositories.
+* Character & user operations (`app/domain/usecase/characters/**`, `app/domain/usecase/users/**`) handle provisioning, updates, and telemetry ingestion while reusing shared helpers in `_shared.py`.
+* Admin automation (`app/domain/usecase/admin/rehydrate_stats.py`) demonstrates system-wide projections built on top of the same ports.
 
 ### 3.3 Domain (Models)
 
-* **User** with `roles[]` and optional `player`/`referee` profiles.
-* **Quest** with lifecycle (`DRAFT → SIGNUP_OPEN → ROSTER_SELECTED → RUNNING → COMPLETED/CANCELLED`), sign‑ups, roster, waitlist, Discord linkage, telemetry.
-* **QuestSummary** unified with discriminator `kind = player|dm`, visibility policy, and indexed `players[]`/`characters[]` collections for filter-based queries.
+* **Entity IDs** (`EntityIDModel.py`) provide typed prefixes (`UserID`, `QuestID`, `SummaryID`, etc.) ensuring consistency across repos and APIs.
+* **User** (`models/user/UserModel.py`) tracks Discord linkage, role flags (`is_admin`, `is_referee`, `is_player`), and profile aggregates (characters, participation counters).
+* **Quest** (`models/quest/QuestModel.py`) encapsulates lifecycle helpers (`set_completed`, `close_signups`, etc.), validation (duration, Discord links, tag policy), and signup roster management through embedded `PlayerSignUp` dataclasses.
+* **DraftQuest** + **TagPolicy** govern ingestion formatting and tag normalization before promotion to `Quest`.
+* **QuestSummary** and **AdventureSummary** (`models/summary/SummaryModel.py`) unify DM/player narratives, enforce markdown structure, and attach participants, links, and auto-summary metadata.
+* **Value objects** such as `SummaryParticipant`, `SummaryAttachment`, and `InGameTime` capture reusable structure and validation shared across use cases.
 
 ### 3.4 HTTP API Gateway
 
@@ -71,9 +82,30 @@ Nonagon automates quest workflows (announce >> sign‑ups >> roster selection >>
 
 ### 3.5 Adapters (Infra)
 
-* **MongoDB repositories:** implement ports for `UsersRepo`, `QuestsRepo`, `SummariesRepo`.
-* **Config:** environment-driven (exported variables, Docker secrets); no secrets in code.
-* **Background jobs (optional):** projectors to compute analytics/materialized views.
+* **Mongo client lifecycle**
+  * `app/infra/db.py` lazily instantiates a single `AsyncIOMotorClient` using environment settings from `app/infra/settings.py` (TLS, timeouts, CA bundle detection) and exposes `get_db()`, `next_id()`, and `close_client()` helpers.
+  * `app/infra/lifecycle.py` wires FastAPI and discord bot startup/shutdown hooks to open the client and run a ping health check; shutdown closes the cached connection.
+* **Repositories**
+  * Delivery layers inject concrete adapters such as `UsersRepoMongo`, `QuestsRepoMongo`, `SummariesRepoMongo`, `QuestRecordsRepository`, and `SummaryRecordsRepository` (see `app/infra/mongo/**`).
+  * Each repository ensures indexes on bootstrap (unique IDs, Discord message keys, pagination fields) and translates between Mongo documents and domain records.
+  * Secondary adapters (`IngestFailureRepository`, `BotSettingsRepository`, `CharactersRepoMongo`) enable ingestion resilience, guild bootstrap, and character provisioning.
+* **Configuration**
+  * Environment variables (Docker compose, `.env`) drive Mongo URI, DB name, TLS behaviour, API admin token, Discord token, and guild defaults such as `DISCORD_DEFAULT_TEST_GUILD_ID`.
+  * `MongoIdService` stores counters in a `counters` collection to generate sequential IDs shared across API and bot ingestion.
+* **Background jobs (optional)** remain adapters that process projections/analytics off the same ports to keep the domain pure.
+
+### 3.6 API Usage & Postman Integration
+
+* **FastAPI composition**
+  * `app/api/main.py` enables CORS, registers routers (`users`, `admin`, `characters`, `quests`, `summaries`), and shares a single Mongo connection through the lifespan hooks.
+  * Dependencies in `app/api/deps.py` wire singleton repositories/services (e.g., `UsersRepoMongo`, `MongoIdService`, `UserProvisioningService`) and guard privileged endpoints with the `X-Admin-Token` header.
+  * Routers translate HTTP payloads into use case invocations; e.g., `app/api/routers/quests.py` instantiates `CreateQuest`, `AddPlayerSignup`, `MarkQuestCompleted`, etc., returning Pydantic response models via `app/api/mappers.py`.
+  * Clients (internal automation, Discord ingestion jobs) consume `/v1/**` routes to orchestrate quests, signups, user provisioning, and summaries, while health probes hit `/healthz` for readiness checks.
+* **Postman next steps**
+  * Export the OpenAPI document from `http://localhost:8000/openapi.json` (FastAPI auto-generates) and import it into Postman to bootstrap a collection.
+  * Create a Postman environment with variables for `baseUrl`, `X-Admin-Token`, and sample IDs (`questId`, `userId`, etc.) to keep requests reproducible.
+  * Add pre-request scripts that exchange or inject auth tokens when the admin token rotates, and snapshot example responses to aid onboarding.
+  * Optionally commit the generated Postman collection (JSON) under `docs/api/postman/` and reference it in the README so contributors can sync updates alongside schema changes.
 
 ---
 
