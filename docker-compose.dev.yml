@@ -2,7 +2,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: Dockerfile.api
+      dockerfile: src/app/api/Dockerfile
     container_name: nonagon-api
     environment:
       MONGODB_URI: ${ATLAS_URI:?Set ATLAS_URI in .env to your MongoDB Atlas connection string}
@@ -16,7 +16,7 @@ services:
   bot:
     build:
       context: .
-      dockerfile: Dockerfile.bot
+      dockerfile: src/app/bot/Dockerfile
     container_name: nonagon-bot
     environment:
       MONGO_URI: ${ATLAS_URI:?Set ATLAS_URI in .env to your MongoDB Atlas connection string}
