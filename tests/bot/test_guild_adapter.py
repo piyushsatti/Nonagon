@@ -41,6 +41,7 @@ class _FakeDB:
         self._users = _FakeCollection()
         self._quests = _FakeCollection()
         self._characters = _FakeCollection()
+
     def __getitem__(self, name: str):
         if name == "users":
             return self._users
@@ -54,6 +55,7 @@ class _FakeDB:
 class _FakeClient:
     def __init__(self):
         self._db = _FakeDB()
+
     def get_database(self, name: str):
         assert name.isdigit()
         return self._db
