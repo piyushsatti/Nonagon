@@ -1,0 +1,43 @@
+version: "3.13"
+
+x-mongo-env:
+  &mongo-env # Prefer MONGO_URI, fall back to MONGODB_URI, and last-chance ATLAS_URI for developer convenience.
+  MONGO_URI: ${MONGO_URI:-${MONGODB_URI:-${ATLAS_URI:?Set ATLAS_URI in .env to your MongoDB Atlas connection string}}}
+  MONGODB_URI: ${MONGO_URI:-${MONGODB_URI:-${ATLAS_URI:?Set ATLAS_URI in .env to your MongoDB Atlas connection string}}}
+  DB_NAME: ${DB_NAME:-nonagon}
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: nonagon-api
+    env_file: .env
+    environment:
+      <<: *mongo-env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src
+      - ./logs:/app/logs
+    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+    container_name: nonagon-bot
+    env_file: .env
+    environment:
+      <<: *mongo-env
+      BOT_TOKEN: ${BOT_TOKEN:-replace_me_in_.env}
+      BOT_CLIENT_ID: ${BOT_CLIENT_ID:-}
+      DEMO_RESET_ENABLED: ${DEMO_RESET_ENABLED:-false}
+      DEMO_LOG_CHANNEL_ID: ${DEMO_LOG_CHANNEL_ID:-}
+    volumes:
+      - ./src:/app/src
+      - ./logs:/app/logs
+    restart: unless-stopped
+    depends_on:
+      - api
