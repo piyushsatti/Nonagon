@@ -1,69 +1,133 @@
+from __future__ import annotations
+
 import importlib
 import logging
+from typing import Iterable
+
+import discord
+from discord import app_commands
 from discord.ext import commands
 
+from app.bot.utils.log_stream import send_demo_log
+
+
+def _iter_extensions(bot: commands.Bot) -> Iterable[str]:
+    return sorted(bot.extensions.keys())
+
+
 class ExtensionManagerCog(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        super().__init__()
 
-  def __init__(self, bot: commands.Bot):
-    self.bot = bot
+    async def cog_load(self) -> None:
+        self.bot.tree.add_command(self.load_extension)
+        self.bot.tree.add_command(self.unload_extension)
+        self.bot.tree.add_command(self.reload_extension)
+        self.bot.tree.add_command(self.list_extensions)
 
-  async def on_command_error(self, ctx: commands.Context, error: Exception):
-    
-    if isinstance(error, commands.CommandNotFound):
-      return
-    
-    traceback = logging.Formatter().formatException(error.__traceback__)
-    if isinstance(error, commands.CheckFailure):
-      logging.error(f"Check failed for command {ctx.command}:\n{traceback}")
-    elif isinstance(error, commands.CommandInvokeError):
-      logging.error(f"Error invoking command {ctx.command}:\n{traceback}")
-    elif isinstance(error, commands.ExtensionNotFound):
-      logging.error(f"Extension {ctx.command} not found:\n{traceback}")
-    elif isinstance(error, commands.ExtensionAlreadyLoaded):
-      logging.error(f"Extension {ctx.command} is already loaded:\n{traceback}")
-    elif isinstance(error, commands.ExtensionFailed):
-      logging.error(f"Failed to load extension {ctx.command}:\n{traceback}")
-    else:
-      logging.error(f"Error in command {ctx.command}:\n{traceback}")
+    async def cog_unload(self) -> None:
+        self.bot.tree.remove_command(
+            self.load_extension.name, type=self.load_extension.type
+        )
+        self.bot.tree.remove_command(
+            self.unload_extension.name, type=self.unload_extension.type
+        )
+        self.bot.tree.remove_command(
+            self.reload_extension.name, type=self.reload_extension.type
+        )
+        self.bot.tree.remove_command(
+            self.list_extensions.name, type=self.list_extensions.type
+        )
 
-    await ctx.send(f"An error occurred while processing the command: `{error}`")
+    @app_commands.command(name="load", description="Load a bot extension module.")
+    async def load_extension(
+        self, interaction: discord.Interaction, extension: str
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await self.bot.load_extension(extension)
+        except Exception as exc:
+            logging.exception("Failed to load extension %s", extension)
+            await interaction.followup.send(
+                f"Unable to load `{extension}`: {exc}", ephemeral=True
+            )
+            return
 
-  async def cog_before_invoke(self, ctx):
-    logging.info(f"Command invoked: {ctx.command} by {ctx.author} in {ctx.guild}")
-    return await super().cog_before_invoke(ctx)
-  
-  async def cog_after_invoke(self, ctx):
-    logging.info(f"Command completed: {ctx.command} by {ctx.author} in {ctx.guild}")
-    return await super().cog_after_invoke(ctx)
+        if interaction.guild is not None:
+            await send_demo_log(
+                interaction.client,
+                interaction.guild,
+                f"Extension `{extension}` loaded by {interaction.user.mention if isinstance(interaction.user, discord.Member) else interaction.user}",
+            )
+        await interaction.followup.send(
+            f"Loaded extension `{extension}`", ephemeral=True
+        )
 
-  @commands.is_owner()
-  @commands.command(name="load")
-  async def load_extension(self, ctx: commands.Context, ext: str):
-    self.bot.load_extension(ext)
+    @app_commands.command(name="unload", description="Unload a bot extension module.")
+    async def unload_extension(
+        self, interaction: discord.Interaction, extension: str
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await self.bot.unload_extension(extension)
+        except Exception as exc:
+            logging.exception("Failed to unload extension %s", extension)
+            await interaction.followup.send(
+                f"Unable to unload `{extension}`: {exc}", ephemeral=True
+            )
+            return
 
-  @commands.is_owner()
-  @commands.command(name="unload")
-  async def unload_extension(self, ctx: commands.Context, ext: str):
-    self.bot.unload_extension(ext)
+        if interaction.guild is not None:
+            await send_demo_log(
+                interaction.client,
+                interaction.guild,
+                f"Extension `{extension}` unloaded by {interaction.user.mention if isinstance(interaction.user, discord.Member) else interaction.user}",
+            )
+        await interaction.followup.send(
+            f"Unloaded extension `{extension}`", ephemeral=True
+        )
 
-  @commands.is_owner()
-  @commands.command(name="reload")
-  async def reload_extension(self, ctx: commands.Context, ext: str):
-    importlib.reload(importlib.import_module(ext))
-    self.bot.reload_extension(ext)
+    @app_commands.command(name="reload", description="Reload a bot extension module.")
+    async def reload_extension(
+        self, interaction: discord.Interaction, extension: str
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        try:
+            importlib.reload(importlib.import_module(extension))
+            await self.bot.reload_extension(extension)
+        except Exception as exc:
+            logging.exception("Failed to reload extension %s", extension)
+            await interaction.followup.send(
+                f"Unable to reload `{extension}`: {exc}", ephemeral=True
+            )
+            return
 
-  @commands.is_owner()
-  @commands.command(name="extensions")
-  async def list_extensions(self, ctx: commands.Context):
+        if interaction.guild is not None:
+            await send_demo_log(
+                interaction.client,
+                interaction.guild,
+                f"Extension `{extension}` reloaded by {interaction.user.mention if isinstance(interaction.user, discord.Member) else interaction.user}",
+            )
+        await interaction.followup.send(
+            f"Reloaded extension `{extension}`", ephemeral=True
+        )
 
-    if not self.bot.extensions:
-      logging.info("No extensions loaded.")
-      await ctx.send("No extensions loaded.")
-      return
-    
-    exts = "\n".join(self.bot.extensions.keys()) or "(none)"
-    logging.info(f"Loaded extensions: {exts}")
-    await ctx.send(f"Loaded extensions:\n{exts}")
+    @app_commands.command(name="extensions", description="List loaded extensions.")
+    async def list_extensions(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        exts = list(_iter_extensions(self.bot))
+        if not exts:
+            logging.info("No extensions loaded.")
+            await interaction.followup.send("No extensions loaded.", ephemeral=True)
+            return
+
+        formatted = "\n".join(exts)
+        logging.info("Loaded extensions: %s", formatted)
+        await interaction.followup.send(
+            f"Loaded extensions:\n{formatted}", ephemeral=True
+        )
+
 
 async def setup(bot: commands.Bot):
-  await bot.add_cog(ExtensionManagerCog(bot))
+    await bot.add_cog(ExtensionManagerCog(bot))

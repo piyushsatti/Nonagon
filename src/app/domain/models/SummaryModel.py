@@ -21,6 +21,7 @@ class QuestSummary:
     author_id: UserID
     character_id: CharacterID
     quest_id: QuestID
+    guild_id: int | None = None
 
     # Content
     raw: str

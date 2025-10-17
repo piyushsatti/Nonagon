@@ -8,6 +8,18 @@
 - [Redis](https://redis.io/)
 - [MongoDB](https://www.mongodb.com/docs/mongodb-shell/)
 
+# Environment Configuration
+- `BOT_TOKEN` – Discord bot token.
+- `BOT_CLIENT_ID` – Discord application client ID (used by `/invite`).
+- `MONGO_URI` – MongoDB connection string (defaults to `mongodb://localhost:27017`).
+- `DEMO_RESET_ENABLED` – set to `true` to allow `/demo_reset` and CLI resets.
+- `DEMO_LOG_CHANNEL_ID` – optional channel id for posting demo activity logs.
+
+# Testing
+- Domain: `PYTHONPATH=src .venv/bin/pytest tests/domain -q`
+- API sanity: `PYTHONPATH=src .venv/bin/pytest tests/api -q`
+- Bot helpers: `PYTHONPATH=src .venv/bin/pytest tests/bot -q`
+
 # Discord Bot Development Milestones
 
 ## Milestone 0 — Setup & Scaffolding (1–2 days)
@@ -27,6 +39,26 @@
 - [ ] `!endquest <quest_id> <xp> <gp>` → store rewards  
 - [ ] Persist character-quest linkage  
 > **Success:** Quests + attendance correctly stored.
+
+### Slash Commands (beta)
+- `/createquest` – announce a new quest with start time, duration, and image.
+- `/joinquest` / `/leavequest` – manage quest signups using registered characters.
+- `/startquest` / `/endquest` – transition quests through their lifecycle.
+- `/character_add` / `/character_list` – create and review character profiles.
+- `/stats` – view personal engagement metrics.
+- `/leaderboard` – show top users by messages, reactions, or voice time.
+- Quest announcements ship with persistent **Join**/**Leave** buttons; players can submit their character IDs via a modal without memorising command syntax.
+- Ending a quest automatically DM’s signed-up players with a reminder to file their summaries.
+- `/nudges enable|disable` – opt into or out of DM reminders (respects personal preference).
+
+### Demo Ops Toolkit
+- `/demo_about` (ephemeral) – share a quick tour of the demo capabilities.
+- `/demo_reset` (admins) – wipe and rehydrate demo data via MongoDB cache bootstrap.
+- **Web Dashboard**: `GET /demo` (served by FastAPI) to view live leaderboards and upcoming quests.
+- **API Endpoints**:
+  - `GET /demo/leaderboard?metric=messages` – JSON leaderboard across guilds.
+  - `GET /demo/quests` – upcoming quest feed.
+- `scripts/reset_demo.py --guild-id <id>` – CLI helper mirroring `/demo_reset`.
 
 ---
 
@@ -76,12 +108,15 @@
 
 
 # Database
-We are using mongodb.
+Use MongoDB Atlas for persistence.
 
-Each user is a document,
-users are a collection
+- Set `ATLAS_URI` in your `.env` to the Atlas connection string (e.g. `mongodb+srv://...`).
+- API reads `MONGODB_URI` (wired from `ATLAS_URI` in docker-compose) and uses Motor/PyMongo default TLS.
+- Bot reads `MONGO_URI` (wired from `ATLAS_URI`). No local Mongo container is used.
 
-users + players + referees + characters is a database which is per guild
+Data model (per guild database):
+- Each guild maps to a database named by its guild ID.
+- Collections: `users`, `characters`, `quests`, `summaries`, and `counters` for ID sequences.
 
 
 

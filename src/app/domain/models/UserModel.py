@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, fields, replace
-from datetime import datetime
+from dataclasses import asdict, dataclass, field, fields
+from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from app.domain.models.EntityIDModel import CharacterID, QuestID, SummaryID, UserID
+
+if TYPE_CHECKING:
+    from discord import Member
 
 
 class Role(Enum):
@@ -18,11 +21,15 @@ class Role(Enum):
 class User:
     # Identity
     user_id: UserID
+    guild_id: Optional[int] = None
     discord_id: Optional[str] = None
     dm_channel_id: Optional[str] = None
 
     # Roles
     roles: List[Role] = field(default_factory=lambda: [Role.MEMBER])
+
+    # Communication preferences
+    dm_opt_in: bool = True
 
     # Timestamps / activity
     joined_at: Optional[datetime] = None
@@ -180,6 +187,9 @@ class User:
         if self.dm_channel_id is not None and not isinstance(self.dm_channel_id, str):
             raise ValueError("dm_channel_id must be a string or None")
 
+        if not isinstance(self.dm_opt_in, bool):
+            raise ValueError("dm_opt_in must be a boolean")
+
         if self.joined_at is not None and not isinstance(self.joined_at, datetime):
             raise ValueError("joined_at must be a datetime or None")
 
@@ -225,13 +235,51 @@ class User:
 
     # ---------- Serialization ----------
 
-    def from_dict(self, data: Dict[str, Any]) -> User:
-        valid = {f.name for f in fields(self.__dict__)}
-        filtered = {k: v for k, v in data.items() if k in valid}
-        return replace(self, **filtered)
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> User:
+        valid = {f.name for f in fields(cls)}
+        payload = {k: v for k, v in data.items() if k in valid}
+
+        user_id = payload.get("user_id")
+        if isinstance(user_id, dict):
+            payload["user_id"] = UserID(**user_id)
+        elif isinstance(user_id, int):
+            payload["user_id"] = UserID(number=user_id)
+
+        roles = payload.get("roles")
+        if roles is not None:
+            payload["roles"] = [
+                Role(r) if not isinstance(r, Role) else r for r in roles
+            ]
+
+        player = payload.get("player")
+        if isinstance(player, dict):
+            payload["player"] = Player.from_dict(player)
+
+        referee = payload.get("referee")
+        if isinstance(referee, dict):
+            payload["referee"] = Referee.from_dict(referee)
+
+        return cls(**payload)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_member(cls, member: "Member") -> User:
+        joined_at = member.joined_at
+        last_active = joined_at or datetime.now(timezone.utc)
+
+        user = cls(
+            user_id=UserID(number=member.id),
+            guild_id=getattr(member.guild, "id", None),
+            discord_id=str(member.id),
+            joined_at=joined_at,
+            last_active_at=last_active,
+            dm_opt_in=True,
+        )
+        user.validate_user()
+        return user
 
 
 @dataclass
@@ -370,10 +418,56 @@ class Player:
 
     # ---------- Serialization helper ----------
 
-    def from_dict(self, data: Dict[str, Any]) -> Player:
-        valid = {f.name for f in fields(self.__dict__)}
-        filtered = {k: v for k, v in data.items() if k in valid}
-        return replace(self, **filtered)
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> Player:
+        valid = {f.name for f in fields(cls)}
+        payload = {k: v for k, v in data.items() if k in valid}
+
+        characters = payload.get("characters")
+        if characters is not None:
+            payload["characters"] = [
+                (
+                    CharacterID(**c)
+                    if isinstance(c, dict)
+                    else (CharacterID.parse(c) if isinstance(c, str) else c)
+                )
+                for c in characters
+            ]
+
+        quests_applied = payload.get("quests_applied")
+        if quests_applied is not None:
+            payload["quests_applied"] = [
+                (
+                    QuestID(**q)
+                    if isinstance(q, dict)
+                    else (QuestID.parse(q) if isinstance(q, str) else q)
+                )
+                for q in quests_applied
+            ]
+
+        quests_played = payload.get("quests_played")
+        if quests_played is not None:
+            payload["quests_played"] = [
+                (
+                    QuestID(**q)
+                    if isinstance(q, dict)
+                    else (QuestID.parse(q) if isinstance(q, str) else q)
+                )
+                for q in quests_played
+            ]
+
+        summaries_written = payload.get("summaries_written")
+        if summaries_written is not None:
+            payload["summaries_written"] = [
+                (
+                    SummaryID(**s)
+                    if isinstance(s, dict)
+                    else (SummaryID.parse(s) if isinstance(s, str) else s)
+                )
+                for s in summaries_written
+            ]
+
+        return cls(**payload)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -487,10 +581,46 @@ class Referee:
 
     # ---------- Serialization helper ----------
 
-    def from_dict(self, data: Dict[str, Any]) -> Referee:
-        valid = {f.name for f in fields(self.__dict__)}
-        filtered = {k: v for k, v in data.items() if k in valid}
-        return replace(self, **filtered)
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> Referee:
+        valid = {f.name for f in fields(cls)}
+        payload = {k: v for k, v in data.items() if k in valid}
+
+        quests_hosted = payload.get("quests_hosted")
+        if quests_hosted is not None:
+            payload["quests_hosted"] = [
+                QuestID(**q) if isinstance(q, dict) else q for q in quests_hosted
+            ]
+
+        summaries_written = payload.get("summaries_written")
+        if summaries_written is not None:
+            payload["summaries_written"] = [
+                SummaryID(**s) if isinstance(s, dict) else s for s in summaries_written
+            ]
+
+        collabed_with = payload.get("collabed_with")
+        if collabed_with is not None:
+            payload["collabed_with"] = {
+                (
+                    UserID(**k)
+                    if isinstance(k, dict)
+                    else (UserID.parse(k) if isinstance(k, str) else k)
+                ): v
+                for k, v in collabed_with.items()
+            }
+
+        hosted_for = payload.get("hosted_for")
+        if hosted_for is not None:
+            payload["hosted_for"] = {
+                (
+                    UserID(**k)
+                    if isinstance(k, dict)
+                    else (UserID.parse(k) if isinstance(k, str) else k)
+                ): v
+                for k, v in hosted_for.items()
+            }
+
+        return cls(**payload)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

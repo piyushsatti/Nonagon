@@ -9,6 +9,7 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 
 * **Base URL (local dev):** `http://127.0.0.1:8000`
 * **Versioning:** All endpoints are under `/v1/**`
+* **Guild scoping (experimental):** Users routes are per-guild under `/v1/guilds/{guild_id}/users/**`.
 * **Swagger UI:** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 * **Health check:** `GET /healthz`
 
@@ -41,6 +42,7 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 {
   "discord_id": "12345",
   "dm_channel_id": "67890",
+  "dm_opt_in": true,
   "roles": ["MEMBER", "PLAYER"]
 }
 ```
@@ -50,12 +52,15 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 ```json
 {
   "user_id": "USER0001",
+  "guild_id": 123,
   "discord_id": "12345",
   "roles": ["MEMBER","PLAYER"],
   "joined_at": "2025-08-31T12:00:00Z",
   "last_active_at": "2025-08-31T15:10:00Z",
-  "is_player": true,
-  "is_referee": false,
+  "messages_count_total": 5,
+  "reactions_given": 1,
+  "reactions_received": 2,
+  "voice_total_time_spent": 0.5,
   "player": {"characters": ["CHAR0007"]},
   "referee": null
 }
@@ -165,20 +170,22 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 
 ## Endpoints
 
-### Users
+### Users (guild-scoped)
 
-* `POST /v1/users` — Create a user
-* `GET /v1/users/{userId}` — Fetch user
-* `GET /v1/users?role=PLAYER` — List/filter users
-* `PATCH /v1/users/{userId}` — Update user
-* `DELETE /v1/users/{userId}` — Delete user
-* `POST /v1/users/{userId}:enablePlayer` — Add PLAYER role
-* `POST /v1/users/{userId}:disablePlayer` — Remove PLAYER role
-* `POST /v1/users/{userId}:enableReferee` — Add REFEREE role
-* `POST /v1/users/{userId}:disableReferee` — Remove REFEREE role
-* `POST /v1/users/{userId}/characters/{characterId}:link` — Link character to user
-* `POST /v1/users/{userId}/characters/{characterId}:unlink` — Unlink character
-* `POST /v1/users/{userId}:updateLastActive` — Update last active
+All Users endpoints require a path parameter `guild_id` and operate only on records for that guild.
+
+* `POST /v1/guilds/{guild_id}/users` — Create a user
+* `GET /v1/guilds/{guild_id}/users/{userId}` — Fetch user
+* `PATCH /v1/guilds/{guild_id}/users/{userId}` — Update user
+* `DELETE /v1/guilds/{guild_id}/users/{userId}` — Delete user
+* `GET /v1/guilds/{guild_id}/users/by-discord/{discordId}` — Fetch by Discord snowflake
+* `POST /v1/guilds/{guild_id}/users/{userId}:enablePlayer` — Add PLAYER role
+* `POST /v1/guilds/{guild_id}/users/{userId}:disablePlayer` — Remove PLAYER role
+* `POST /v1/guilds/{guild_id}/users/{userId}:enableReferee` — Add REFEREE role
+* `POST /v1/guilds/{guild_id}/users/{userId}:disableReferee` — Remove REFEREE role
+* `POST /v1/guilds/{guild_id}/users/{userId}/characters/{characterId}:link` — Link character to user
+* `POST /v1/guilds/{guild_id}/users/{userId}/characters/{characterId}:unlink` — Unlink character
+* `POST /v1/guilds/{guild_id}/users/{userId}:updateLastActive` — Update last active
 
 ### Characters
 
@@ -234,7 +241,7 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 * **QuestIn**: `starting_at` must be in the future; `duration_min` ≥ 15 (recommend ≥ 60).
 * **SummaryIn**: Requires non-empty `title`, `description`, `raw`; at least one `player` and one `character`.
 * **CharacterIn**: Requires `owner_id` and valid links.
-* **User**: Must respect role/profile consistency.
+* **User**: Must respect role/profile consistency; operations are scoped to the provided `guild_id`.
 
 ---
 

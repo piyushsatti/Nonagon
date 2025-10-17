@@ -24,6 +24,7 @@ class PlayerStatus(Enum):
 class Quest:
     # Identity / owner
     quest_id: QuestID
+    guild_id: int
     referee_id: UserID  # Referee responsible
     channel_id: str
     message_id: str

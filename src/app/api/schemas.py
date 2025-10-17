@@ -1,29 +1,38 @@
 from datetime import datetime
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # --- Shared Types ---
 UserRole = Literal["MEMBER", "PLAYER", "REFEREE"]
 CharacterStatus = Literal["ACTIVE", "RETIRED"]
 QuestStatus = Literal["ANNOUNCED", "COMPLETED", "CANCELLED"]
 SummaryKind = Literal["PLAYER", "REFEREE"]
+LeaderboardMetric = Literal[
+    "messages",
+    "reactions_given",
+    "reactions_received",
+    "voice",
+]
 
 
 # --- Users ---
 class UserIn(BaseModel):
-    pass
+    discord_id: Optional[str] = None
+    dm_channel_id: Optional[str] = None
+    dm_opt_in: Optional[bool] = True
+    roles: List[UserRole] = Field(default_factory=list)
 
 
 class User(UserIn):
     user_id: str
-    roles: List[UserRole] = None
+    guild_id: int
     joined_at: Optional[datetime] = None
     last_active_at: Optional[datetime] = None
-    message_count_total: Optional[int] = None
-    reactions_given: Optional[int] = None
-    reactions_received: Optional[int] = None
-    voice_time_total_spent: Optional[int] = None  # hours
+    messages_count_total: int = 0
+    reactions_given: int = 0
+    reactions_received: int = 0
+    voice_total_time_spent: float = 0.0
 
     player: Optional[dict] = None
     referee: Optional[dict] = None
@@ -97,3 +106,28 @@ class Summary(SummaryIn):
     author_id: Optional[str] = None
     created_on: Optional[datetime] = None
     last_edited_at: Optional[datetime] = None
+
+
+class LeaderboardEntry(BaseModel):
+    guild_id: str
+    discord_id: Optional[str] = None
+    metric: LeaderboardMetric
+    value: float
+
+
+class LeaderboardResponse(BaseModel):
+    metric: LeaderboardMetric
+    entries: List[LeaderboardEntry]
+
+
+class UpcomingQuest(BaseModel):
+    guild_id: str
+    quest_id: str
+    title: Optional[str] = None
+    starting_at: Optional[datetime] = None
+    status: Optional[QuestStatus] = None
+    referee_id: Optional[str] = None
+
+
+class UpcomingQuestsResponse(BaseModel):
+    quests: List[UpcomingQuest]

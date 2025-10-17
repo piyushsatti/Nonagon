@@ -5,7 +5,7 @@ from app.domain.models.EntityIDModel import UserID, CharacterID, QuestID, Summar
 from app.domain.usecase.unit import summary_unit
 from app.domain.models.SummaryModel import SummaryKind as DSummaryKind
 from app.api.schemas import Summary as APISumm, SummaryIn as APISummIn
-from app.api.mappers import summary_to_api  # keep existing mapper name
+from app.api.mappers import summary_to_api as summ_to_api  # keep existing mapper name
 
 router = APIRouter(prefix="/v1/summaries", tags=["Summaries"])
 

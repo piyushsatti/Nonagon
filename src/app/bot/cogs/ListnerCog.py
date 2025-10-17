@@ -1,17 +1,102 @@
 import logging
-from datetime import datetime
-from discord import Member, Message, RawReactionActionEvent, VoiceState, Guild
+from datetime import datetime, timezone
+from typing import Optional
+
+from discord import Guild, Member, Message, RawReactionActionEvent, VoiceState
 from discord.ext import commands
 
 from ..database import db_client
-from ..domain.models.UserModel import User
+from ...domain.models.UserModel import User
+from ..services.user_registry import UserRegistry
 
 class ListnerCog(commands.Cog):
 
   def __init__(self, bot: commands.Bot):
     self.bot = bot
-    self._voice_starts: dict[int, datetime] = {}
-    self._voice_channels: dict[int, str] = {}
+    self._voice_sessions: dict[int, datetime] = {}
+    self._user_registry = UserRegistry()
+    self._clock = lambda: datetime.now(timezone.utc)
+
+  async def _ensure_cached_user(self, member: Member) -> User:
+    guild_id = member.guild.id
+    guild_entry = self.bot.guild_data.get(guild_id)
+
+    if guild_entry is None:
+      await self.bot.load_or_create_guild_cache(member.guild)
+      guild_entry = self.bot.guild_data[guild_id]
+
+    users = guild_entry.setdefault("users", {})
+    user = users.get(member.id)
+
+    if user is None:
+      user = await self._user_registry.ensure_member(member, guild_id)
+      user.guild_id = guild_id
+      users[member.id] = user
+
+    return user
+
+  async def _resolve_cached_user(
+    self, guild: Guild, user_id: int
+  ) -> Optional[User]:
+    guild_entry = self.bot.guild_data.get(guild.id)
+
+    if guild_entry is None:
+      await self.bot.load_or_create_guild_cache(guild)
+      guild_entry = self.bot.guild_data[guild.id]
+
+    users = guild_entry.setdefault("users", {})
+    user = users.get(user_id)
+
+    if user is not None:
+      return user
+
+    member = guild.get_member(user_id)
+    if member is None:
+      try:
+        member = await guild.fetch_member(user_id)
+      except Exception as exc:  # pragma: no cover - network edge
+        logging.warning(
+          "Unable to resolve guild member %s in %s: %s",
+          user_id,
+          guild.id,
+          exc,
+        )
+        return None
+
+    user = await self._user_registry.ensure_member(member, guild.id)
+    user.guild_id = guild.id
+    users[user_id] = user
+    return user
+
+  async def _resolve_message_author_id(
+    self, guild: Guild, channel_id: int, message_id: int
+  ) -> Optional[int]:
+    channel = guild.get_channel(channel_id)
+    if channel is None:
+      try:
+        channel = await guild.fetch_channel(channel_id)
+      except Exception as exc:  # pragma: no cover
+        logging.warning(
+          "Unable to resolve channel %s in guild %s: %s",
+          channel_id,
+          guild.id,
+          exc,
+        )
+        return None
+
+    try:
+      message = await channel.fetch_message(message_id)
+    except Exception as exc:  # pragma: no cover
+      logging.warning(
+        "Unable to fetch message %s in channel %s guild %s: %s",
+        message_id,
+        channel_id,
+        guild.id,
+        exc,
+      )
+      return None
+
+    return message.author.id
 
   @commands.Cog.listener("on_member_join")
   async def _on_member_join(self, member: Member):
@@ -19,9 +104,25 @@ class ListnerCog(commands.Cog):
     if member.bot:
       return
 
-    self.bot.guild_data[member.guild.id]["users"][member.id] = User.from_member(member)
+    user = await self._user_registry.ensure_member(member, member.guild.id)
+    user.guild_id = member.guild.id
+    ensure_entry = getattr(self.bot, "_ensure_guild_entry", None)
+    if callable(ensure_entry):
+      guild_entry = ensure_entry(member.guild.id)
+    else:
+      guild_entry = self.bot.guild_data.setdefault(
+        member.guild.id,
+        {"db": db_client.get_database(str(member.guild.id)), "users": {}},
+      )
+    guild_entry.setdefault("users", {})[member.id] = user
     await self.bot.dirty_data.put((member.guild.id, member.id))
-    logging.info(f"User: {member.id} joined the guild. Joined At: {member.joined_at} Total Users: {len(self.bot.guild_data[member.guild.id]['users'])}")
+    logging.info(
+      "User %s joined guild %s at %s (cached users=%d)",
+      member.id,
+      member.guild.id,
+      member.joined_at,
+      len(self.bot.guild_data[member.guild.id]["users"]),
+    )
 
   @commands.Cog.listener("on_message")
   async def on_message(self, message: Message):
@@ -29,144 +130,146 @@ class ListnerCog(commands.Cog):
     if message.author.bot:
       return
 
-    logging.info(f"Message from {message.author.id} in {message.guild.id} at {message.created_at}: {message.content}")
+    if message.guild is None:
+      logging.debug("Skipping DM message from %s (no guild context)", message.author.id)
+      return
 
     guild_id = message.guild.id
     author_id = message.author.id
 
-    users = self.bot.guild_data.get(guild_id, {}).get("users", {})
+    user = await self._ensure_cached_user(message.author)
+    user.increment_messages_count()
 
-    if author_id not in users:
-      raise ValueError(f"User {author_id} not found in guild data for {guild_id}")
-
-    user: User = users[author_id]
-    user.messages_count_total += 1
-    user.last_active_at = message.created_at
-
-    category_id = str(message.channel.category.id)
-    count = user.messages_count_by_category.get(category_id, 0)
-    user.messages_count_by_category[category_id] = count + 1
+    timestamp = message.created_at or self._clock()
+    user.update_last_active(timestamp)
 
     await self.bot.dirty_data.put((guild_id, author_id))
-    logging.info(f"User: {user.user_id} sent a message. Channel: {message.channel.id} Category: {category_id} Total Messages: {user.messages_count_total} Messages by Category: {user.messages_count_by_category} Last Active At: {user.last_active_at}")
+    logging.info(
+      "Processed message gid=%s uid=%s channel=%s total_messages=%d last_active=%s",
+      guild_id,
+      author_id,
+      message.channel.id,
+      user.messages_count_total,
+      user.last_active_at,
+    )
 
   @commands.Cog.listener("on_raw_reaction_add")
   async def _on_raw_reaction_add(self, reaction: RawReactionActionEvent):
 
-    if reaction.member.bot:
+    if reaction.member and reaction.member.bot:
       return
-    
+
     if reaction.event_type != "REACTION_ADD":
       return
-    
+
     if reaction.guild_id is None:
       logging.info(f"No guild ID in reaction: {reaction}")
       return
-    
+
     guild_id = reaction.guild_id
-    reacting_user_id = reaction.member.id
-    message_author_id = reaction.message_author_id
+    reacting_user_id = reaction.member.id if reaction.member else reaction.user_id
 
-    reacting_user = self.bot.guild_data[guild_id]["users"][reacting_user_id]
-    author_user = self.bot.guild_data[guild_id]["users"][message_author_id]
-
-    reacting_user.last_active_at = datetime.now()
-    reacting_user.reactions_given += 1
-    author_user.reactions_received += 1
-
-    # count fun reactions
-    if reaction.emoji.name is None and not reaction.emoji.is_custom_emoji():
+    guild = self.bot.get_guild(guild_id)
+    if guild is None:
+      logging.warning("Guild %s not found for reaction event", guild_id)
       return
 
-    if "ban" in reaction.emoji.name:
-      author_user.fun_count_banned += 1
-    elif "up" in reaction.emoji.name:
-      author_user.fun_count_liked += 1
-    elif "down" in reaction.emoji.name:
-      author_user.fun_count_disliked += 1
-    elif "kek" in reaction.emoji.name:
-      author_user.fun_count_kek += 1
-    elif "true" in reaction.emoji.name:
-      author_user.fun_count_true += 1
-    elif "heart" in reaction.emoji.name:
-      author_user.fun_count_heart += 1
+    reacting_member = reaction.member
+    if reacting_member is None:
+      member_obj = guild.get_member(reacting_user_id)
+      if member_obj is None:
+        try:
+          member_obj = await guild.fetch_member(reacting_user_id)
+        except Exception as exc:  # pragma: no cover - network edge
+          logging.warning(
+            "Unable to resolve reacting member %s in guild %s: %s",
+            reacting_user_id,
+            guild_id,
+            exc,
+          )
+          return
+      reacting_member = member_obj
+    reacting_user = await self._ensure_cached_user(reacting_member)
+    reacting_user.increment_reactions_given()
+    reacting_user.update_last_active(self._clock())
+
+    author_id = await self._resolve_message_author_id(
+      guild, reaction.channel_id, reaction.message_id
+    )
+    if author_id is None:
+      await self.bot.dirty_data.put((guild_id, reacting_user_id))
+      return
+
+    author_user = await self._resolve_cached_user(guild, author_id)
+    if author_user is None:
+      return
+
+    author_user.increment_reactions_received()
 
     await self.bot.dirty_data.put((guild_id, reacting_user_id))
-    await self.bot.dirty_data.put((guild_id, message_author_id))
-    logging.info(f"User: {reacting_user.user_id} reacted with {reaction.emoji.name} to message by {author_user.user_id} in channel {reaction.channel_id} Total Reactions Given: {reacting_user.reactions_given} Total Reactions Received: {author_user.reactions_received} Fun Reactions: {author_user.fun_count_banned}, {author_user.fun_count_liked}, {author_user.fun_count_disliked}, {author_user.fun_count_kek}, {author_user.fun_count_true}, {author_user.fun_count_heart}")
+    await self.bot.dirty_data.put((guild_id, author_id))
+    logging.info(
+      "Processed reaction %s gid=%s reactor=%s author=%s (given=%d received=%d)",
+      reaction.emoji,
+      guild_id,
+      reacting_user_id,
+      author_id,
+      reacting_user.reactions_given,
+      author_user.reactions_received,
+    )
 
   @commands.Cog.listener("on_voice_state_update")
   async def _on_voice_state_update(
-    self, 
-    member: Member, 
-    before: VoiceState, 
+    self,
+    member: Member,
+    before: VoiceState,
     after: VoiceState
   ):
-    
+
     if member.bot:
       return
 
-    if member.id not in self.bot.guild_data[member.guild.id]["users"]:
-      return
+    user = await self._ensure_cached_user(member)
+    user.update_last_active(self._clock())
 
-    user = self.bot.guild_data[member.guild.id]["users"][member.id]
-    user.last_active_at = datetime.now()
-    start = None
-    chan  = None
-    
+    now = self._clock()
+    session_start = self._voice_sessions.get(member.id)
+
     if before.channel is None and after.channel is not None:
-      
-      self._voice_starts[member.id]   = datetime.now()
-      self._voice_channels[member.id] = str(after.channel.id)
+      self._voice_sessions[member.id] = now
 
     elif before.channel is not None and after.channel is None:
-      
-      start = self._voice_starts.pop(member.id, None)
-      chan  = self._voice_channels.pop(member.id, None)
-      
-      if start and chan:
-        
-        hours = (datetime.now() - start).total_seconds() / 3600
-        user.voice_total_time_spent += hours
-
-        if chan in user.voice_time_by_channel:
-          user.voice_time_by_channel[chan] += hours
-      
-        else:
-          user.voice_time_by_channel[chan] = hours
+      if session_start:
+        seconds = int((now - session_start).total_seconds())
+        if seconds > 0:
+          user.add_voice_time_spent(seconds)
+      self._voice_sessions.pop(member.id, None)
 
     elif before.channel is not None and after.channel is not None:
-      
-      start = self._voice_starts.get(member.id)
-      chan  = self._voice_channels.get(member.id)
-        
-      # reset for new channel
-      self._voice_starts[member.id]   = datetime.now()
-      self._voice_channels[member.id] = str(after.channel.id)
+      if session_start:
+        seconds = int((now - session_start).total_seconds())
+        if seconds > 0:
+          user.add_voice_time_spent(seconds)
+      self._voice_sessions[member.id] = now
 
-    # before.channel is None and after.channel is None:
     else:
-      
-      logging.warning(f"""
-        ------------- Cog Warning ------------
-        Unexpected voice state update for user {member.id}
-        with before: {before.channel} and after: {after.channel}
-      """)
-      return 
-    
-    if start and chan:
-        
-      hours = (datetime.now() - start).total_seconds() / 3600
-      user.voice_total_time_spent += hours
-
-      if chan in user.voice_time_by_channel:
-        user.voice_time_by_channel[chan] += hours
-    
-      else:
-        user.voice_time_by_channel[chan] = hours
+      logging.warning(
+        "Unexpected voice update for %s (before=%s, after=%s)",
+        member.id,
+        before.channel,
+        after.channel,
+      )
+      return
 
     await self.bot.dirty_data.put((member.guild.id, member.id))
-    logging.info(f"User: {user.user_id} changed voice state. Before: {before.channel} After: {after.channel} Total Voice Time: {user.voice_total_time_spent} hours Time by Channel: {user.voice_time_by_channel}")
+    logging.info(
+      "Voice state update gid=%s uid=%s before=%s after=%s total_hours=%.2f",
+      member.guild.id,
+      member.id,
+      getattr(before.channel, "id", None),
+      getattr(after.channel, "id", None),
+      user.voice_total_time_spent,
+    )
 
   @commands.Cog.listener("on_guild_join")
   async def _on_guild_join(self, guild: Guild):
@@ -179,12 +282,13 @@ class ListnerCog(commands.Cog):
 
     users = {}
     for member in guild.members:
-      
+
       if member.bot:
         continue
-      
-      logging.info(f"Creating user cache for {member.name} (ID: {member.id})")
-      users[member.id] = User.from_member(member)
+
+      logging.info("Caching user for guild join %s (ID: %s)", member.name, member.id)
+      user = await self._user_registry.ensure_member(member)
+      users[member.id] = user
 
       await self.bot.dirty_data.put((guild.id, member.id))
 

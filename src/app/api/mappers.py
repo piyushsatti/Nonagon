@@ -56,14 +56,20 @@ def _list(xs: Optional[List[Any]]) -> List[Any]:
 
 def user_to_api(u: DUser) -> APIUser:
     return APIUser(
-        user_id=u.user_id,
-        roles=[r.value for r in u.roles],
+        user_id=str(u.user_id),
+        guild_id=int(getattr(u, "guild_id", 0) or 0),
+        discord_id=u.discord_id,
+        dm_channel_id=u.dm_channel_id,
+        dm_opt_in=u.dm_opt_in,
+        roles=[r.value for r in u.roles] if getattr(u, "roles", None) else [],
         joined_at=u.joined_at,
         last_active_at=u.last_active_at,
-        message_count_total=u.messages_count_total,
+        messages_count_total=u.messages_count_total,
         reactions_given=u.reactions_given,
         reactions_received=u.reactions_received,
-        voice_time_total_spent=u.voice_total_time_spent,
+        voice_total_time_spent=u.voice_total_time_spent,
+        player=u.player.to_dict() if getattr(u, "player", None) else None,
+        referee=u.referee.to_dict() if getattr(u, "referee", None) else None,
     )
 
 

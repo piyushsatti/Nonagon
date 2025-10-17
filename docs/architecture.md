@@ -45,6 +45,17 @@ Nonagon automates quest workflows (announce >> sign‑ups >> roster selection >>
 * **Views (UI):** `discord.ui.View` classes own component callbacks; presenters build embeds.
 * **Rate limiting:** centralized wrapper handles retries/backoff when editing messages.
 
+#### 3.1.1 Discord Intents
+
+The user telemetry feature set relies on Discord gateway events that are only delivered when the corresponding intents are enabled both in code and on the developer portal. Ensure the following are turned on before deploying analytics collectors:
+
+- MESSAGE CONTENT — required to receive full `MESSAGE_CREATE` payloads to increment message counters and derive activity timestamps.
+- GUILD_MESSAGE_REACTIONS — surfaces `REACTION_ADD` / `REACTION_REMOVE` for reaction metrics.
+- GUILD_MEMBERS — exposes `on_member_join` data to seed `joined_at` and supply member snowflakes for lookups.
+- GUILD_VOICE_STATES — streams join/leave transitions to accumulate voice-session durations.
+
+All four intents must be requested in `discord.Intents` during bot startup. The privileged intents (MESSAGE CONTENT, GUILD_MEMBERS) also need to be explicitly approved in the Discord developer portal. Capture approval screenshots or ticket IDs for future reference.
+
 ### 3.2 Application (Use Cases)
 
 * One file per action; no framework imports. Examples:

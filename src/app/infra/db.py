@@ -32,6 +32,11 @@ def get_db() -> AsyncIOMotorDatabase:
     return get_client()[DB_NAME]
 
 
+def get_guild_db(guild_id: int | str) -> AsyncIOMotorDatabase:
+    """Return the per-guild database named by the Discord guild id."""
+    return get_client()[str(guild_id)]
+
+
 async def ping() -> bool:
     try:
         # admin DB per official examples
@@ -42,12 +47,12 @@ async def ping() -> bool:
         return False
 
 
-async def next_id(id_cls: Type[T]) -> T:
+async def next_id(id_cls: Type[T], guild_id: int | str | None = None) -> T:
     """
     Generate the next sequential ID for a given EntityID subclass.
     Stores counters in a 'counters' collection keyed by prefix.
     """
-    db = get_db()
+    db = get_guild_db(guild_id) if guild_id is not None else get_db()
     doc = await db["counters"].find_one_and_update(
         {"_id": id_cls.prefix},
         {"$inc": {"seq": 1}},

@@ -23,6 +23,7 @@ class Character:
     character_thread_link: str
     token_link: str
     art_link: str
+    guild_id: int | None = None
     status: CharacterRole = CharacterRole.ACTIVE
 
     # Telemetry

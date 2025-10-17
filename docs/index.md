@@ -10,14 +10,17 @@ A lightweight system that helps players sign up for quests, referees run session
 ###  Quick Start
 | Section | Description |
 |--------|-------------|
-| [Getting Started](README.md) | Install, configure, and run the bot locally |
-| [Architecture](architecture.md) | See the layered structure & design choices |
-| [PRD & Use Cases](prd.md) | In-depth breakdown of features and user stories |
+| [Getting Started](../README.md) | Install, configure, and run the bot locally |
+| [Architecture](architecture.md) | Layered structure, design choices, and intents |
+| [PRD & Use Cases](PRD.md) | In-depth breakdown of features and user stories |
+| [Discord Commands](discord.md) | Slash commands: inputs, permissions, outputs |
+| [API Reference](API.md) | REST endpoints and schemas |
 
 ---
 
 ###  Project Status
-**v0.1 (Alpha):**
-- Quest creation >> signup automation >> roster selection functional  
-- Summary linking integrated  
-- Remaining: analytics dashboards & performance tuning
+**Experimental (multi-guild):**
+- Per-guild data model and indexes (`guild_id` everywhere)
+- Guild-scoped Users API under `/v1/guilds/{guild_id}/users`
+- Migration script to backfill `guild_id` on legacy docs
+- Diagnostics and demo utilities updated for guild scoping

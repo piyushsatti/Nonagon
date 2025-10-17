@@ -14,7 +14,7 @@ This document outlines the Product Requirements Document (PRD) for the Nonagon D
 
 **Status**: Draft
 
-**Last Updated**: 24 Aug 2025
+**Last Updated**: 24 Aug 2025 (see Experimental Delta below)
 
 **Contributors**: Piyush Satti
 
@@ -187,3 +187,35 @@ There are two main problems:
 * Single dev team.
 * Users already familiar with Discord workflows.
 
+---
+
+## Appendix A: Experimental Branch Delta (vs main)
+
+This branch introduces multi-guild scoping, guild-aware APIs, and data migration utilities. Differences from main:
+
+- Multi-guild data model and storage
+  - Added `guild_id` to domain models (User, Character, Quest, Summary) and to all MongoDB documents.
+  - Repositories and queries updated to filter by `guild_id` to prevent cross-guild collisions.
+  - Sync adapters (flush paths) now upsert with compound filters including `guild_id`.
+  - Per-guild compound indexes created for users, quests, and characters.
+
+- Migration utilities
+  - New script `scripts/migrations/backfill_guild_id.py` to populate `guild_id` on legacy documents and ensure indexes.
+
+- Bot cache and persistence
+  - `Nonagon.guild_data` and the background flush loop operate per-guild.
+  - Cache loader prefers documents with `guild_id`, falls back to legacy data for bootstrap.
+
+- Slash commands & cogs
+  - All quest/character/statistics operations explicitly scope to the interaction guild.
+  - Diagnostics and demo utilities updated to honor guild scoping.
+
+- Public API changes
+  - Introduced guild-scoped Users routes under `/v1/guilds/{guild_id}/users` with create/read/update/delete and role toggles.
+  - API schemas updated to include `guild_id` and normalized telemetry field names (`messages_count_total`, etc.).
+
+- Documentation
+  - New `docs/discord.md` enumerates all slash commands, inputs, permissions, outputs, and logging.
+  - Folded the Discord Intents checklist into `docs/architecture.md`; removed `docs/discord_intents.md`.
+
+Note: Main branch retains single-guild assumptions and non-scoped API shapes; this branch is compatible with legacy data via the provided migration.

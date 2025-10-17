@@ -1,27 +1,49 @@
-from dataclasses import asdict, is_dataclass
 import logging
+import os
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
-import certifi
 
 from .config import MONGO_URI
 
-db_client = MongoClient(
-    MONGO_URI,
-    tls=True,
-    tlsCAFile=certifi.where(),
-    server_api=ServerApi('1')
-)
+
+def _make_client() -> MongoClient:
+  """Create a MongoClient with optional TLS if explicitly enabled.
+
+  By default, containers talk to the local Mongo service without TLS.
+  Set `MONGO_TLS=true` and ensure `certifi` is installed if you want TLS.
+  """
+  # Resolve URI with a clear error if missing
+  uri = (MONGO_URI or os.getenv("MONGODB_URI") or "").strip()
+  if not uri:
+    raise RuntimeError(
+      "MongoDB URI is not set. Provide ATLAS_URI in .env (mapped to MONGO_URI/MONGODB_URI)."
+    )
+
+  use_tls = os.getenv("MONGO_TLS", "false").lower() in {"1", "true", "yes"}
+  kwargs = {"server_api": ServerApi('1')}
+
+  if use_tls:
+    try:
+      import certifi  # type: ignore
+      kwargs.update({"tls": True, "tlsCAFile": certifi.where()})
+    except ModuleNotFoundError:
+      logging.warning("MONGO_TLS requested but 'certifi' not installed; proceeding without TLS")
+
+  return MongoClient(uri, **kwargs)
+
+
+db_client = _make_client()
 
 try:
   db_client.admin.command('ping')
-  logging.info("Pinged your deployment. You successfully connected to MongoDB!")
-
+  logging.info("Pinged MongoDB. Connection OK.")
 except Exception as e:
-  logging.error(e)
+  logging.error("MongoDB ping failed: %s", e)
 
-def create_db(db_name):
+
+def create_db(db_name: str):
   return db_client.get_database(db_name)
 
-def delete_db(db_name):
+
+def delete_db(db_name: str):
   return db_client.drop_database(db_name)
