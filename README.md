@@ -39,6 +39,8 @@ docker compose -f docker-compose.dev.yml up --build -d
 
 This builds the images, starts the API on port `8000`, and launches the Discord bot.
 
+After inviting the bot to a guild, an administrator should run `/setup` once to create the default Quest Manager role, sign-up channel, and log channel. Use `/setup_status` to review the configuration or `/setup_reset` to clear stored settings if you need to start over.
+
 ### Running Tests
 
 Placeholder:

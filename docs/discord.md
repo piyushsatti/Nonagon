@@ -132,3 +132,19 @@ This page documents the bot’s slash commands, their inputs, permission require
   - Output: ephemeral confirmation after DB reset and reseed
   - Logging: info log; demo log
 
+## Guild Setup
+- `setup`
+  - Inputs: `force?: bool`
+  - Permissions: manage_guild or administrator
+  - Output: Ensures Quest Manager role, sign-up channel, and log channel exist; stores configuration per guild
+  - Logging: info logs when resources are created
+- `setup_status`
+  - Inputs: none
+  - Permissions: none (read-only)
+  - Output: Displays the stored configuration for the current guild
+  - Logging: none
+- `setup_reset`
+  - Inputs: none
+  - Permissions: manage_guild or administrator
+  - Output: Removes stored configuration references without deleting Discord resources
+  - Logging: none
