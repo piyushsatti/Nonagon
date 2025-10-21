@@ -13,10 +13,8 @@ from app.domain.models.EntityIDModel import EntityID
 
 def to_bson(x: Any) -> Any:
     if isinstance(x, EntityID):
-        payload: dict[str, Any] = {"value": str(x.value), "prefix": x.prefix}
-        if x.number is not None:
-            payload["number"] = x.number
-        return payload
+        # Persist the canonical postal value alongside the prefix for legacy fallbacks.
+        return {"value": str(x.value), "prefix": x.prefix}
 
     # Enums -> their .value (str/int) so PyMongo can encode them
     if isinstance(x, Enum):

@@ -27,6 +27,7 @@ This page documents the bot’s slash commands, their inputs, permission require
 ## Quest Lifecycle
 
 > **ID format:** All quest, character, and summary identifiers use postal-style values such as `QUESH3X1T7` or `CHARB2F4D9`. Slash commands expect the full ID string (including prefix).
+> Demo logs for quest actions surface these postal IDs directly so moderators can cross-check announcements.
 
 - `createquest`
   - Inputs: `title: str`, `start_time_epoch: int>=0`, `duration_hours: int[1..48]`, `description?: str`, `image_url?: str`

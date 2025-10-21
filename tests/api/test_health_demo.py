@@ -72,8 +72,8 @@ def test_demo_leaderboard_and_quests(monkeypatch):
                 users=[{"discord_id": "111", "messages_count_total": 5}],
                 quests=[
                     {
-                        "quest_id": {"prefix": "QUES", "number": 1},
-                        "referee_id": {"prefix": "USER", "number": 111},
+                        "quest_id": {"prefix": "QUES", "value": "QUESA1B2C3"},
+                        "referee_id": {"prefix": "USER", "value": "USERD4E5F6"},
                         "title": "Seeded",
                         "starting_at": None,
                         "status": "ANNOUNCED",
@@ -83,8 +83,8 @@ def test_demo_leaderboard_and_quests(monkeypatch):
                 summaries=[
                     {
                         "kind": "PLAYER",
-                        "quest_id": {"prefix": "QUES", "number": 1},
-                        "character_id": {"prefix": "CHAR", "number": 2},
+                        "quest_id": {"prefix": "QUES", "value": "QUESA1B2C3"},
+                        "character_id": {"prefix": "CHAR", "value": "CHARA1B2C3"},
                         "title": "Recap",
                         "created_on": None,
                     }
