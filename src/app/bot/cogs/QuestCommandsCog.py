@@ -1407,32 +1407,41 @@ class QuestCommandsCog(commands.Cog):
     ) -> Optional[discord.Member]:
         await self._ensure_guild_cache(guild)
         guild_entry = self.bot.guild_data.get(guild.id)
+        def _coerce_discord_id(raw: object) -> int | None:
+            if isinstance(raw, int):
+                return raw
+            if isinstance(raw, str):
+                digits = raw.strip()
+                if digits.isdigit():
+                    return int(digits)
+            return None
+
         candidate_ids: set[int] = set()
 
         if guild_entry:
             users = guild_entry.get("users", {})
             for cached_discord_id, cached_user in users.items():
                 try:
-                    if cached_user.user_id == user_id:
-                        if isinstance(cached_discord_id, int):
-                            candidate_ids.add(cached_discord_id)
-                        discord_id_str = getattr(cached_user, "discord_id", None)
-                        if isinstance(discord_id_str, str) and discord_id_str.isdigit():
-                            candidate_ids.add(int(discord_id_str))
+                    if cached_user.user_id != user_id:
+                        continue
+                    parsed = _coerce_discord_id(cached_discord_id)
+                    if parsed is not None:
+                        candidate_ids.add(parsed)
+                    cached_value = getattr(cached_user, "discord_id", None)
+                    parsed = _coerce_discord_id(cached_value)
+                    if parsed is not None:
+                        candidate_ids.add(parsed)
                 except AttributeError:
                     continue
 
-        if not candidate_ids:
-            try:
-                repo_user = await self._users_repo.get(guild.id, str(user_id))
-            except Exception:
-                repo_user = None
-            if repo_user and isinstance(repo_user.discord_id, str) and repo_user.discord_id.isdigit():
-                candidate_ids.add(int(repo_user.discord_id))
-
-        body = user_id.body
-        if body.isdigit():
-            candidate_ids.add(int(body))
+        try:
+            repo_user = await self._users_repo.get(guild.id, str(user_id))
+        except Exception:
+            repo_user = None
+        if repo_user is not None:
+            parsed = _coerce_discord_id(getattr(repo_user, "discord_id", None))
+            if parsed is not None:
+                candidate_ids.add(parsed)
 
         for discord_id in candidate_ids:
             member = guild.get_member(discord_id)
@@ -2400,7 +2409,7 @@ class QuestCommandsCog(commands.Cog):
         quest_id=quest_id_autocomplete, character_id=character_id_autocomplete
     )
     @app_commands.describe(
-        quest_id="Quest identifier (e.g. QUES0001)",
+    quest_id="Quest identifier (e.g. QUESA1B2C3)",
         character_id="Character identifier (e.g. CHAR0001)",
     )
     async def joinquest(
@@ -2438,7 +2447,7 @@ class QuestCommandsCog(commands.Cog):
     )
     @app_commands.autocomplete(quest_id=quest_id_autocomplete)
     @app_commands.describe(
-        quest_id="Quest identifier (e.g. QUES0001)",
+    quest_id="Quest identifier (e.g. QUESA1B2C3)",
     )
     async def leavequest(
         self,
@@ -2464,7 +2473,7 @@ class QuestCommandsCog(commands.Cog):
     @app_commands.command(
         name="startquest", description="Close signups and mark a quest as started."
     )
-    @app_commands.describe(quest_id="Quest identifier (e.g. QUES0001)")
+    @app_commands.describe(quest_id="Quest identifier (e.g. QUESA1B2C3)")
     async def startquest(self, interaction: discord.Interaction, quest_id: str) -> None:
         await interaction.response.defer(ephemeral=True)
 
@@ -2549,7 +2558,7 @@ class QuestCommandsCog(commands.Cog):
         name="endquest",
         description="Mark a quest as completed and record the finish time.",
     )
-    @app_commands.describe(quest_id="Quest identifier (e.g. QUES0001)")
+    @app_commands.describe(quest_id="Quest identifier (e.g. QUESA1B2C3)")
     async def endquest(self, interaction: discord.Interaction, quest_id: str) -> None:
         await interaction.response.defer(ephemeral=True)
 

@@ -28,20 +28,20 @@ CollectionSpec = Tuple[Iterable[Tuple[str, int]], Dict[str, object]]
 
 INDEX_SPECS: Dict[str, Tuple[CollectionSpec, ...]] = {
     "users": (
-        ((("guild_id", ASCENDING), ("user_id.number", ASCENDING)), {"unique": True, "name": "guild_user_number"}),
+        ((("guild_id", ASCENDING), ("user_id.value", ASCENDING)), {"unique": True, "name": "guild_user_value"}),
         ((("guild_id", ASCENDING), ("discord_id", ASCENDING)), {"unique": True, "sparse": True, "name": "guild_discord_id"}),
     ),
     "quests": (
-        ((("guild_id", ASCENDING), ("quest_id.number", ASCENDING)), {"unique": True, "name": "guild_quest_number"}),
+        ((("guild_id", ASCENDING), ("quest_id.value", ASCENDING)), {"unique": True, "name": "guild_quest_value"}),
         ((("guild_id", ASCENDING), ("channel_id", ASCENDING), ("message_id", ASCENDING)), {"unique": True, "name": "guild_channel_message"}),
     ),
     "characters": (
-        ((("guild_id", ASCENDING), ("character_id.number", ASCENDING)), {"unique": True, "name": "guild_character_number"}),
-        ((("guild_id", ASCENDING), ("owner_id.number", ASCENDING)), {"name": "guild_character_owner"}),
+        ((("guild_id", ASCENDING), ("character_id.value", ASCENDING)), {"unique": True, "name": "guild_character_value"}),
+        ((("guild_id", ASCENDING), ("owner_id.value", ASCENDING)), {"name": "guild_character_owner"}),
     ),
     "summaries": (
-        ((("guild_id", ASCENDING), ("summary_id.number", ASCENDING)), {"unique": True, "name": "guild_summary_number"}),
-        ((("guild_id", ASCENDING), ("author_id.number", ASCENDING)), {"name": "guild_summary_author"}),
+        ((("guild_id", ASCENDING), ("summary_id.value", ASCENDING)), {"unique": True, "name": "guild_summary_value"}),
+        ((("guild_id", ASCENDING), ("author_id.value", ASCENDING)), {"name": "guild_summary_author"}),
     ),
 }
 

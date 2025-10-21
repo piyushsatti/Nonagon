@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import random
 import re
-import string
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
+from app.domain.id_utils import generate_postal_id, validate_postal_id
 
 POSTAL_BODY_PATTERN = re.compile(r"^[A-Z]\d[A-Z]\d[A-Z]\d$")
 LEGACY_BODY_PATTERN = re.compile(r"^\d+$")
@@ -14,43 +13,46 @@ LEGACY_BODY_PATTERN = re.compile(r"^\d+$")
 @dataclass(frozen=True, slots=True)
 class EntityID:
     prefix: ClassVar[str] = "BASE"
-    value: str
+    value: str | None = None
 
     def __post_init__(self) -> None:
-        normalized = self._normalize(self.value)
+        raw = self.value if self.value is not None else self._generate_default()
+        normalized = self._normalize(raw)
         object.__setattr__(self, "value", normalized)
 
     @classmethod
     def _normalize(cls, raw: Any) -> str:
-        if raw is None:
-            raise ValueError("ID value is required")
-
         if isinstance(raw, EntityID):
             raw = raw.value
 
-        raw_str = str(raw)
-        cleaned = raw_str.strip().upper()
-        if not cleaned:
+        if raw is None:
             raise ValueError("ID value cannot be empty")
 
+        raw_str = str(raw).strip()
+        if not raw_str:
+            raise ValueError("ID value cannot be empty")
+
+        cleaned = raw_str.upper()
         if cleaned.startswith(cls.prefix):
+            candidate = cleaned
             body = cleaned[len(cls.prefix) :]
         else:
             body = cleaned
+            candidate = f"{cls.prefix}{cleaned}"
 
-        cls._validate_body(body)
-        return f"{cls.prefix}{body}"
+        if validate_postal_id(candidate, prefix=cls.prefix):
+            return candidate
+
+        if LEGACY_BODY_PATTERN.fullmatch(body):
+            return candidate
+
+        raise ValueError(
+            "Invalid ID body. Expected postal pattern (e.g., H3X1T7) or a legacy numeric string."
+        )
 
     @classmethod
-    def _validate_body(cls, body: str) -> None:
-        if POSTAL_BODY_PATTERN.fullmatch(body):
-            return
-        if LEGACY_BODY_PATTERN.fullmatch(body):
-            return
-        raise ValueError(
-            "Invalid ID body. Expected pattern letter-digit repeated three times "
-            "(e.g., H3X1T7) or a legacy numeric string."
-        )
+    def _generate_default(cls) -> str:
+        raise ValueError("Subclasses must supply a value or override _generate_default().")
 
     @property
     def body(self) -> str:
@@ -59,7 +61,7 @@ class EntityID:
     @property
     def number(self) -> int | None:
         body = self.body
-        return int(body) if body.isdigit() else None
+        return int(body) if LEGACY_BODY_PATTERN.fullmatch(body) else None
 
     def __str__(self) -> str:
         return self.value
@@ -70,41 +72,44 @@ class EntityID:
 
     @classmethod
     def from_body(cls, body: str) -> "EntityID":
-        cleaned = body.strip().upper()
-        cls._validate_body(cleaned)
-        return cls(f"{cls.prefix}{cleaned}")
+        return cls(body)
 
     @classmethod
     def generate(cls) -> "EntityID":
-        return cls(f"{cls.prefix}{cls._random_body()}")
-
-    @classmethod
-    def _random_body(cls) -> str:
-        letters = string.ascii_uppercase
-        digits = string.digits
-        rng = random.SystemRandom()
-        parts = [
-            rng.choice(letters) if index % 2 == 0 else rng.choice(digits)
-            for index in range(6)
-        ]
-        return "".join(parts)
+        return cls()
 
 
 @dataclass(frozen=True, slots=True)
 class UserID(EntityID):
     prefix: ClassVar[str] = "USER"
 
+    @classmethod
+    def _generate_default(cls) -> str:
+        return generate_postal_id(cls.prefix)
+
 
 @dataclass(frozen=True, slots=True)
 class QuestID(EntityID):
     prefix: ClassVar[str] = "QUES"
+
+    @classmethod
+    def _generate_default(cls) -> str:
+        return generate_postal_id(cls.prefix)
 
 
 @dataclass(frozen=True, slots=True)
 class CharacterID(EntityID):
     prefix: ClassVar[str] = "CHAR"
 
+    @classmethod
+    def _generate_default(cls) -> str:
+        return generate_postal_id(cls.prefix)
+
 
 @dataclass(frozen=True, slots=True)
 class SummaryID(EntityID):
     prefix: ClassVar[str] = "SUMM"
+
+    @classmethod
+    def _generate_default(cls) -> str:
+        return generate_postal_id(cls.prefix)
