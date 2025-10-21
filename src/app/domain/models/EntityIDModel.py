@@ -4,7 +4,7 @@ import random
 import re
 import string
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Any, ClassVar
 
 
 POSTAL_BODY_PATTERN = re.compile(r"^[A-Z]\d[A-Z]\d[A-Z]\d$")
@@ -21,20 +21,23 @@ class EntityID:
         object.__setattr__(self, "value", normalized)
 
     @classmethod
-    def _normalize(cls, raw: str) -> str:
+    def _normalize(cls, raw: Any) -> str:
         if raw is None:
             raise ValueError("ID value is required")
 
-        cleaned = raw.strip().upper()
+        if isinstance(raw, EntityID):
+            raw = raw.value
+
+        raw_str = str(raw)
+        cleaned = raw_str.strip().upper()
         if not cleaned:
             raise ValueError("ID value cannot be empty")
 
-        if not cleaned.startswith(cls.prefix):
-            raise ValueError(
-                f"Expected prefix {cls.prefix}, received {cleaned[: len(cls.prefix)]}"
-            )
+        if cleaned.startswith(cls.prefix):
+            body = cleaned[len(cls.prefix) :]
+        else:
+            body = cleaned
 
-        body = cleaned[len(cls.prefix) :]
         cls._validate_body(body)
         return f"{cls.prefix}{body}"
 
@@ -54,8 +57,9 @@ class EntityID:
         return self.value[len(self.prefix) :]
 
     @property
-    def number(self) -> str:
-        return self.body
+    def number(self) -> int | None:
+        body = self.body
+        return int(body) if body.isdigit() else None
 
     def __str__(self) -> str:
         return self.value

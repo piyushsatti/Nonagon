@@ -9,16 +9,16 @@ SRC_PATH = ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-from app.domain.models.CharacterModel import Character
-from app.domain.models.EntityIDModel import QuestID, UserID
-from app.domain.models.QuestModel import Quest
-from app.domain.models.UserModel import User
-from app.infra.mongo.guild_adapter import (
+from app.domain.models.CharacterModel import Character  # noqa: E402
+from app.domain.models.EntityIDModel import QuestID, UserID  # noqa: E402
+from app.domain.models.QuestModel import Quest  # noqa: E402
+from app.domain.models.UserModel import User  # noqa: E402
+from app.infra.mongo.guild_adapter import (  # noqa: E402
     upsert_character_sync,
     upsert_quest_sync,
     upsert_user_sync,
 )
-from app.infra.serialization import from_bson, to_bson
+from app.infra.serialization import from_bson, to_bson  # noqa: E402
 
 
 class _FakeCollection:
@@ -66,13 +66,13 @@ def test_upsert_user_sync_builds_filter():
     user = User(user_id=UserID(42))
     upsert_user_sync(client, guild_id=123, user=user)
     filt, doc, upsert = client._db._users.last
-    assert filt == {"guild_id": 123, "user_id.number": 42}
+    assert filt == {"guild_id": 123, "user_id.value": str(user.user_id)}
     assert upsert is True
     payload = doc["$set"]
-    assert payload["user_id"]["number"] == 42
+    assert payload["user_id"]["value"] == str(user.user_id)
     assert payload["guild_id"] == 123
     index_keys = [keys for keys, _ in client._db._users.indexes]
-    assert (("guild_id", 1), ("user_id.number", 1)) in index_keys
+    assert (("guild_id", 1), ("user_id.value", 1)) in index_keys
     assert (("guild_id", 1), ("discord_id", 1)) in index_keys
 
 
@@ -88,13 +88,13 @@ def test_upsert_quest_sync_builds_filter():
     )
     upsert_quest_sync(client, guild_id=123, quest=q)
     filt, doc, upsert = client._db._quests.last
-    assert filt == {"guild_id": 123, "quest_id.number": 7}
+    assert filt == {"guild_id": 123, "quest_id.value": str(q.quest_id)}
     assert upsert is True
     payload = doc["$set"]
-    assert payload["quest_id"]["number"] == 7
+    assert payload["quest_id"]["value"] == str(q.quest_id)
     assert payload["guild_id"] == 123
     quest_indexes = [keys for keys, _ in client._db._quests.indexes]
-    assert (("guild_id", 1), ("quest_id.number", 1)) in quest_indexes
+    assert (("guild_id", 1), ("quest_id.value", 1)) in quest_indexes
     assert (("guild_id", 1), ("channel_id", 1), ("message_id", 1)) in quest_indexes
 
 
@@ -111,13 +111,13 @@ def test_upsert_character_sync_builds_filter():
     )
     upsert_character_sync(client, guild_id=123, character=c)
     filt, doc, upsert = client._db._characters.last
-    assert filt == {"guild_id": 123, "character_id.number": 3}
+    assert filt == {"guild_id": 123, "character_id": c.character_id}
     assert upsert is True
     payload = doc["$set"]
     assert payload["guild_id"] == 123
     char_indexes = [keys for keys, _ in client._db._characters.indexes]
-    assert (("guild_id", 1), ("character_id.number", 1)) in char_indexes
-    assert (("guild_id", 1), ("owner_id.number", 1)) in char_indexes
+    assert (("guild_id", 1), ("character_id", 1)) in char_indexes
+    assert (("guild_id", 1), ("owner_id.value", 1)) in char_indexes
 
 
 def test_user_serialization_roundtrip_guild_id():

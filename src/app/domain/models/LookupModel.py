@@ -49,7 +49,7 @@ class LookupEntry:
             raise ValueError("name cannot be empty")
         if len(trimmed) > 80:
             raise ValueError("name must be 80 characters or fewer")
-        if any(ord(ch) < 32 for ch in trimmed):
+        if any(ord(ch) < 32 for ch in self.name):
             raise ValueError("name cannot contain control characters")
 
     def _validate_url(self) -> None:

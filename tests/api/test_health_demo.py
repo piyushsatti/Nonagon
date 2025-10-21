@@ -30,14 +30,22 @@ class _FakeCollection:
 
 
 class _FakeDB:
-    def __init__(self, users: List[Dict[str, Any]] = None, quests: List[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        users: List[Dict[str, Any]] | None = None,
+        quests: List[Dict[str, Any]] | None = None,
+        summaries: List[Dict[str, Any]] | None = None,
+    ):
         self._users = users or []
         self._quests = quests or []
+        self._summaries = summaries or []
     def __getitem__(self, name: str):
         if name == "users":
             return _FakeCollection(self._users)
         if name == "quests":
             return _FakeCollection(self._quests)
+        if name == "summaries":
+            return _FakeCollection(self._summaries)
         raise KeyError(name)
 
 

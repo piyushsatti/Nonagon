@@ -36,6 +36,6 @@ async def test_quests_repo_upsert_scopes_by_guild(monkeypatch):
     await repo.upsert(789, quest)
 
     filt, doc, upsert = fake.last_replace_one
-    assert filt == {"guild_id": 789, "quest_id.number": 5}
+    assert filt == {"guild_id": 789, "quest_id.value": str(quest.quest_id)}
     assert doc["guild_id"] == 789
     assert upsert is True

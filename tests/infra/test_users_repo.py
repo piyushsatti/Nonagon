@@ -23,7 +23,7 @@ class _FakeCollection:
         # Return a minimal BSON-like document when requested
         return {
             "guild_id": filt.get("guild_id"),
-            "user_id": {"prefix": "USER", "number": 1},
+            "user_id": {"prefix": "USER", "value": "USER1"},
             "discord_id": filt.get("discord_id"),
             "roles": [],
             "dm_opt_in": True,
@@ -40,7 +40,7 @@ async def test_users_repo_upsert_scopes_by_guild(monkeypatch):
     await repo.upsert(123, user)
 
     filt, doc, upsert = fake.last_replace_one
-    assert filt == {"guild_id": 123, "user_id.number": 1}
+    assert filt == {"guild_id": 123, "user_id.value": str(user.user_id)}
     assert doc["guild_id"] == 123
     assert upsert is True
 

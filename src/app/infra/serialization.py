@@ -6,10 +6,18 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Union, get_args, get_origin
 
+from app.domain.models.EntityIDModel import EntityID
+
 # ---------- Encoding (Python -> BSON-friendly) ----------
 
 
 def to_bson(x: Any) -> Any:
+    if isinstance(x, EntityID):
+        payload: dict[str, Any] = {"value": str(x.value), "prefix": x.prefix}
+        if x.number is not None:
+            payload["number"] = x.number
+        return payload
+
     # Enums -> their .value (str/int) so PyMongo can encode them
     if isinstance(x, Enum):
         return x.value

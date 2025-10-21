@@ -150,7 +150,7 @@ def _setup_signup_env(monkeypatch):
 
     player = User(user_id=UserID(42), guild_id=123)
     player.enable_player()
-    character_id = CharacterID(number=7)
+    character_id = CharacterID.parse("CHAR0007")
     player.player.add_character(character_id)
     fake_users._store[(123, str(player.user_id))] = player
     fake_characters._store[(123, str(character_id))] = {"_id": "CHAR7"}
