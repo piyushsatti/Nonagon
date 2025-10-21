@@ -7,20 +7,21 @@ from typing import TYPE_CHECKING, List, Optional
 
 import discord
 
-from app.bot.quest.models import ForgePreviewState
+from app.bot.quest.models import ForgePreviewState, parse_forge_draft
+from app.bot.utils.log_stream import send_demo_log
 from app.domain.models.EntityIDModel import CharacterID, QuestID, UserID
 from app.domain.models.QuestModel import PlayerSignUp, PlayerStatus, Quest
 
 if TYPE_CHECKING:
-    from app.bot.cogs.QuestCommandsCog import QuestCommandsCog
+    from app.bot.quest.service import QuestService
 
 NO_PENDING_REQUESTS_LABEL = "No pending requests"
 
 
 class ForgeDraftView(discord.ui.View):
-    def __init__(self, cog: "QuestCommandsCog", message: discord.Message) -> None:
+    def __init__(self, service: "QuestService", message: discord.Message) -> None:
         super().__init__(timeout=None)
-        self.cog = cog
+        self.service = service
         self.guild_id = message.guild.id if message.guild else 0
         self.channel_id = message.channel.id
         self.message_id = message.id
@@ -46,7 +47,7 @@ class ForgeDraftView(discord.ui.View):
             return False
 
         try:
-            user = await self.cog._get_cached_user(interaction.user)
+            user = await self.service.get_cached_user(interaction.user)
         except Exception:
             await interaction.response.send_message(
                 "Unable to resolve your profile; please try again shortly.",
@@ -79,7 +80,7 @@ class ForgeDraftView(discord.ui.View):
             return None
 
     def _preview_state(self) -> ForgePreviewState:
-        return self.cog.forge_preview_state(self.guild_id, self.message_id)
+        return self.service.forge_preview_state(self.guild_id, self.message_id)
 
     async def _resolve_thread(
         self,
@@ -153,9 +154,9 @@ class ForgeDraftView(discord.ui.View):
 
         await interaction.response.defer(ephemeral=True, thinking=True)
 
-        draft = self.cog._parse_forge_draft(message.content)
+        draft = parse_forge_draft(message.content)
         quest_id = f"DRAFT{self.message_id}"
-        embed = self.cog._draft_to_embed(
+        embed = self.service.build_draft_embed(
             draft,
             quest_id=quest_id,
             referee_display=interaction.user.mention,
@@ -189,10 +190,10 @@ class ForgeDraftView(discord.ui.View):
             )
             return
 
-        draft = self.cog._parse_forge_draft(message.content)
+        draft = parse_forge_draft(message.content)
 
         try:
-            result = await self.cog._approve_forge_draft(
+            result = await self.service.approve_forge_draft(
                 interaction,
                 draft=draft,
                 author=interaction.user,
@@ -227,14 +228,14 @@ class ForgeDraftView(discord.ui.View):
             await interaction.followup.send("Draft already removed.", ephemeral=True)
             return
 
-        await self.cog._discard_forge_draft(interaction, source_message=message)
+        await self.service.discard_forge_draft(interaction, source_message=message)
         await interaction.followup.send("Draft discarded.", ephemeral=True)
 
 
 class JoinQuestModal(discord.ui.Modal):
-    def __init__(self, cog: "QuestCommandsCog", quest_id: str) -> None:
+    def __init__(self, service: "QuestService", quest_id: str) -> None:
         super().__init__(title=f"Join {quest_id}")
-        self.cog = cog
+        self.service = service
         self.quest_id = quest_id
         self.character_input = discord.ui.TextInput(
             label="Character ID",
@@ -249,7 +250,7 @@ class JoinQuestModal(discord.ui.Modal):
         try:
             quest_id_obj = QuestID.parse(self.quest_id)
             char_id_obj = CharacterID.parse(self.character_input.value.strip().upper())
-            message = await self.cog._execute_join(
+            message = await self.service.execute_join(
                 interaction, quest_id_obj, char_id_obj
             )
         except ValueError as exc:
@@ -259,9 +260,9 @@ class JoinQuestModal(discord.ui.Modal):
 
 
 class QuestSignupView(discord.ui.View):
-    def __init__(self, cog: "QuestCommandsCog", quest_id: Optional[str] = None) -> None:
+    def __init__(self, service: "QuestService", quest_id: Optional[str] = None) -> None:
         super().__init__(timeout=None)
-        self.cog = cog
+        self.service = service
         self.quest_id = quest_id
 
     def _resolve_quest_id(self, interaction: discord.Interaction) -> str:
@@ -298,14 +299,14 @@ class QuestSignupView(discord.ui.View):
 
         class _EphemeralJoin(discord.ui.View):
             def __init__(
-                self, cog: "QuestCommandsCog", quest_id: str, member: discord.Member
+                self, service: "QuestService", quest_id: str, member: discord.Member
             ):
                 super().__init__(timeout=60)
-                self.add_item(CharacterSelect(cog, quest_id, member))
+                self.add_item(CharacterSelect(service, quest_id, member))
 
         await interaction.response.send_message(
             "Select your character to request a spot:",
-            view=_EphemeralJoin(self.cog, quest_id, interaction.user),
+            view=_EphemeralJoin(self.service, quest_id, interaction.user),
             ephemeral=True,
         )
 
@@ -333,7 +334,7 @@ class QuestSignupView(discord.ui.View):
             return
 
         try:
-            reviewer = await self.cog._get_cached_user(interaction.user)
+            reviewer = await self.service.get_cached_user(interaction.user)
         except Exception:
             await interaction.response.send_message(
                 "Unable to resolve your profile; please try again shortly.",
@@ -347,7 +348,7 @@ class QuestSignupView(discord.ui.View):
             )
             return
 
-        quest = self.cog._fetch_quest(interaction.guild.id, quest_id)
+        quest = self.service.fetch_quest(interaction.guild.id, quest_id)
         if quest is None:
             await interaction.response.send_message(
                 "Quest not found; please refresh the announcement.",
@@ -364,7 +365,7 @@ class QuestSignupView(discord.ui.View):
             return
 
         view = SignupDecisionView(
-            cog=self.cog,
+            service=self.service,
             guild=interaction.guild,
             quest=quest,
             reviewer=interaction.user,
@@ -394,7 +395,7 @@ class QuestSignupView(discord.ui.View):
 
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            message = await self.cog._execute_nudge(interaction, quest_id)
+            message = await self.service.execute_nudge(interaction, quest_id)
         except ValueError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
             return
@@ -418,7 +419,7 @@ class QuestSignupView(discord.ui.View):
 
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            message = await self.cog._execute_leave(interaction, quest_id_obj)
+            message = await self.service.execute_leave(interaction, quest_id_obj)
         except ValueError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
             return
@@ -426,11 +427,11 @@ class QuestSignupView(discord.ui.View):
 
 
 class CharacterSelect(discord.ui.Select):
-    def __init__(self, cog: "QuestCommandsCog", quest_id: str, member: discord.Member):
-        self.cog = cog
+    def __init__(self, service: "QuestService", quest_id: str, member: discord.Member):
+        self.service = service
         self.quest_id = quest_id
         self.member = member
-        guild_entry = cog.bot.guild_data.get(member.guild.id)
+        guild_entry = service.bot.guild_data.get(member.guild.id)
         options: list[discord.SelectOption] = []
         if guild_entry is not None:
             db = guild_entry["db"]
@@ -469,14 +470,14 @@ class CharacterSelect(discord.ui.Select):
         value = self.values[0]
         if value == "__MODAL__":
             await interaction.response.send_modal(
-                JoinQuestModal(self.cog, self.quest_id)
+                JoinQuestModal(self.service, self.quest_id)
             )
             return
 
         try:
             quest_id_obj = QuestID.parse(self.quest_id)
             char_id_obj = CharacterID.parse(value)
-            message = await self.cog._execute_join(
+            message = await self.service.execute_join(
                 interaction, quest_id_obj, char_id_obj
             )
         except Exception as exc:
@@ -490,14 +491,14 @@ class SignupDecisionView(discord.ui.View):
     def __init__(
         self,
         *,
-        cog: "QuestCommandsCog",
+        service: "QuestService",
         guild: discord.Guild,
         quest: Quest,
         reviewer: discord.Member,
         pending: List[PlayerSignUp],
     ) -> None:
         super().__init__(timeout=120)
-        self.cog = cog
+        self.service = service
         self.guild = guild
         self.quest = quest
         self.reviewer = reviewer
@@ -534,7 +535,7 @@ class SignupDecisionView(discord.ui.View):
 
         for signup in self.pending_signups:
             marker = "->" if str(signup.user_id) == self.selected_user_id else "- "
-            label = self.cog._format_signup_label(self.guild.id, signup)
+            label = self.service.format_signup_label(self.guild.id, signup)
             lines.append(f"{marker} {label}")
         return "\n".join(lines)
 
@@ -542,7 +543,7 @@ class SignupDecisionView(discord.ui.View):
         options: List[discord.SelectOption] = []
         for signup in self.pending_signups[:25]:
             user_id_str = str(signup.user_id)
-            label = self.cog._format_signup_label(self.guild.id, signup)
+            label = self.service.format_signup_label(self.guild.id, signup)
             options.append(
                 discord.SelectOption(
                     label=label[:100],
@@ -602,7 +603,7 @@ class SignupDecisionView(discord.ui.View):
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         try:
-            via_api = await self.cog._select_signup_via_api(
+            via_api = await self.service.select_signup_via_api(
                 self.guild, self.quest, signup.user_id
             )
         except ValueError as exc:
@@ -615,13 +616,13 @@ class SignupDecisionView(discord.ui.View):
             except ValueError as exc:
                 await interaction.followup.send(str(exc), ephemeral=True)
                 return
-            await self.cog._persist_quest(self.guild.id, self.quest)
+            self.service.persist_quest(self.guild.id, self.quest)
         else:
-            refreshed = self.cog._fetch_quest(self.guild.id, self.quest.quest_id)
+            refreshed = self.service.fetch_quest(self.guild.id, self.quest.quest_id)
             if refreshed is not None:
                 self.quest = refreshed
 
-        await self.cog._sync_quest_announcement(
+        await self.service.sync_quest_announcement(
             self.guild,
             self.quest,
             approved_by_display=self.reviewer.mention,
@@ -630,17 +631,17 @@ class SignupDecisionView(discord.ui.View):
 
         await self._notify_player(signup, accepted=True)
         await self._notify_channel(signup, accepted=True)
-        await self.cog._demo_log(
-            self.cog.bot,
+        await send_demo_log(
+            self.service.bot,
             self.guild,
-            f"{self.reviewer.mention} accepted {self.cog._format_signup_label(self.guild.id, signup)} for `{self.quest.title or self.quest.quest_id}`",
+            f"{self.reviewer.mention} accepted {self.service.format_signup_label(self.guild.id, signup)} for `{self.quest.title or self.quest.quest_id}`",
         )
 
         self._refresh_from_quest()
         await interaction.message.edit(content=self.render_panel_text(), view=self)
 
         await interaction.followup.send(
-            f"Accepted {self.cog._format_signup_label(self.guild.id, signup)}.",
+            f"Accepted {self.service.format_signup_label(self.guild.id, signup)}.",
             ephemeral=True,
         )
 
@@ -655,7 +656,7 @@ class SignupDecisionView(discord.ui.View):
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         try:
-            via_api = await self.cog._remove_signup_via_api(
+            via_api = await self.service.remove_signup_via_api(
                 self.guild, self.quest, signup.user_id
             )
         except ValueError as exc:
@@ -668,13 +669,13 @@ class SignupDecisionView(discord.ui.View):
             except ValueError as exc:
                 await interaction.followup.send(str(exc), ephemeral=True)
                 return
-            await self.cog._persist_quest(self.guild.id, self.quest)
+            self.service.persist_quest(self.guild.id, self.quest)
         else:
-            refreshed = self.cog._fetch_quest(self.guild.id, self.quest.quest_id)
+            refreshed = self.service.fetch_quest(self.guild.id, self.quest.quest_id)
             if refreshed is not None:
                 self.quest = refreshed
 
-        await self.cog._sync_quest_announcement(
+        await self.service.sync_quest_announcement(
             self.guild,
             self.quest,
             approved_by_display=self.reviewer.mention,
@@ -683,17 +684,17 @@ class SignupDecisionView(discord.ui.View):
 
         await self._notify_player(signup, accepted=False)
         await self._notify_channel(signup, accepted=False)
-        await self.cog._demo_log(
-            self.cog.bot,
+        await send_demo_log(
+            self.service.bot,
             self.guild,
-            f"{self.reviewer.mention} declined {self.cog._format_signup_label(self.guild.id, signup)} for `{self.quest.title or self.quest.quest_id}`",
+            f"{self.reviewer.mention} declined {self.service.format_signup_label(self.guild.id, signup)} for `{self.quest.title or self.quest.quest_id}`",
         )
 
         self._refresh_from_quest()
         await interaction.message.edit(content=self.render_panel_text(), view=self)
 
         await interaction.followup.send(
-            f"Declined {self.cog._format_signup_label(self.guild.id, signup)}.",
+            f"Declined {self.service.format_signup_label(self.guild.id, signup)}.",
             ephemeral=True,
         )
 
@@ -707,7 +708,7 @@ class SignupDecisionView(discord.ui.View):
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         try:
-            via_api = await self.cog._close_signups_via_api(self.guild, self.quest)
+            via_api = await self.service.close_signups_via_api(self.guild, self.quest)
         except ValueError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
             return
@@ -718,9 +719,9 @@ class SignupDecisionView(discord.ui.View):
             except ValueError as exc:
                 await interaction.followup.send(str(exc), ephemeral=True)
                 return
-            await self.cog._persist_quest(self.guild.id, self.quest)
+            self.service.persist_quest(self.guild.id, self.quest)
         else:
-            refreshed = self.cog._fetch_quest(self.guild.id, self.quest.quest_id)
+            refreshed = self.service.fetch_quest(self.guild.id, self.quest.quest_id)
             if refreshed is not None:
                 self.quest = refreshed
             else:
@@ -729,7 +730,7 @@ class SignupDecisionView(discord.ui.View):
                 except ValueError:
                     pass
 
-        await self.cog._sync_quest_announcement(
+        await self.service.sync_quest_announcement(
             self.guild,
             self.quest,
             approved_by_display=self.reviewer.mention,
@@ -737,8 +738,8 @@ class SignupDecisionView(discord.ui.View):
         )
 
         await self._notify_channel_closed()
-        await self.cog._demo_log(
-            self.cog.bot,
+        await send_demo_log(
+            self.service.bot,
             self.guild,
             f"{self.reviewer.mention} closed signups for `{self.quest.title or self.quest.quest_id}`",
         )
@@ -752,7 +753,9 @@ class SignupDecisionView(discord.ui.View):
         )
 
     async def _notify_player(self, signup: PlayerSignUp, *, accepted: bool) -> None:
-        member = await self.cog._resolve_member_for_user_id(self.guild, signup.user_id)
+        member = await self.service.resolve_member_for_user_id(
+            self.guild, signup.user_id
+        )
         if member is None:
             return
 
@@ -786,7 +789,7 @@ class SignupDecisionView(discord.ui.View):
             return
 
         action = "accepted" if accepted else "declined"
-        label = self.cog._format_signup_label(self.guild.id, signup)
+        label = self.service.format_signup_label(self.guild.id, signup)
         try:
             await channel.send(
                 f"{self.reviewer.mention} {action} {label} for quest `{self.quest.title or self.quest.quest_id}`."
