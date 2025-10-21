@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import List, Optional
 
 import aiohttp
 import discord
@@ -281,7 +282,7 @@ class QuestSignupView(discord.ui.View):
         raise ValueError("Unable to determine quest id from message.")
 
     @discord.ui.button(
-        label="Join Quest",
+        label="Request to Join",
         style=discord.ButtonStyle.success,
         custom_id="quest_signup:join",
     )
@@ -310,9 +311,74 @@ class QuestSignupView(discord.ui.View):
                 self.add_item(CharacterSelect(cog, quest_id, member))
 
         await interaction.response.send_message(
-            "Select your character to join:",
+            "Select your character to request a spot:",
             view=_EphemeralJoin(self.cog, quest_id, interaction.user),
             ephemeral=True,
+        )
+
+    @discord.ui.button(
+        label="Review Requests",
+        style=discord.ButtonStyle.secondary,
+        custom_id="quest_signup:review",
+    )
+    async def review_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        try:
+            quest_id_raw = self._resolve_quest_id(interaction)
+            quest_id = QuestID.parse(quest_id_raw)
+        except ValueError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+
+        if interaction.guild is None or not isinstance(
+            interaction.user, discord.Member
+        ):
+            await interaction.response.send_message(
+                "Unable to review requests outside a guild.", ephemeral=True
+            )
+            return
+
+        try:
+            reviewer = await self.cog._get_cached_user(interaction.user)
+        except Exception:
+            await interaction.response.send_message(
+                "Unable to resolve your profile; please try again shortly.",
+                ephemeral=True,
+            )
+            return
+
+        if not reviewer.is_referee:
+            await interaction.response.send_message(
+                "Only referees can review quest requests.", ephemeral=True
+            )
+            return
+
+        quest = self.cog._fetch_quest(interaction.guild.id, quest_id)
+        if quest is None:
+            await interaction.response.send_message(
+                "Quest not found; please refresh the announcement.",
+                ephemeral=True,
+            )
+            return
+
+        pending = [s for s in quest.signups if s.status is not PlayerStatus.SELECTED]
+        if not pending:
+            await interaction.response.send_message(
+                "No pending requests at the moment.", ephemeral=True
+            )
+            return
+
+        view = SignupDecisionView(
+            cog=self.cog,
+            guild=interaction.guild,
+            quest=quest,
+            reviewer=interaction.user,
+            pending=pending,
+        )
+
+        await interaction.response.send_message(
+            view.render_panel_text(), view=view, ephemeral=True
         )
 
     @discord.ui.button(
@@ -397,6 +463,307 @@ class CharacterSelect(discord.ui.Select):
         await interaction.response.send_message(message, ephemeral=True)
 
 
+class SignupDecisionView(discord.ui.View):
+    def __init__(
+        self,
+        *,
+        cog: "QuestCommandsCog",
+        guild: discord.Guild,
+        quest: Quest,
+        reviewer: discord.Member,
+        pending: List[PlayerSignUp],
+    ) -> None:
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.guild = guild
+        self.quest = quest
+        self.reviewer = reviewer
+        self.pending_signups: List[PlayerSignUp] = list(pending)
+        self.pending_map: dict[str, PlayerSignUp] = {
+            str(signup.user_id): signup for signup in self.pending_signups
+        }
+        self.selected_user_id: Optional[str] = None
+
+        self.select = SignupPendingSelect(self)
+        self.add_item(self.select)
+        self.accept_button = SignupApproveButton()
+        self.decline_button = SignupDeclineButton()
+        self.add_item(self.accept_button)
+        self.add_item(self.decline_button)
+
+        self._refresh_from_quest()
+
+    def render_panel_text(self) -> str:
+        quest_name = self.quest.title or str(self.quest.quest_id)
+        lines = [f"Pending requests for `{quest_name}`:"]
+        if not self.pending_signups:
+            lines.append("All requests have been reviewed.")
+            return "\n".join(lines)
+
+        for signup in self.pending_signups:
+            marker = "->" if str(signup.user_id) == self.selected_user_id else "- "
+            label = self.cog._format_signup_label(self.guild.id, signup)
+            lines.append(f"{marker} {label}")
+        return "\n".join(lines)
+
+    def _build_options(self) -> List[discord.SelectOption]:
+        options: List[discord.SelectOption] = []
+        for signup in self.pending_signups[:25]:
+            user_id_str = str(signup.user_id)
+            label = self.cog._format_signup_label(self.guild.id, signup)
+            options.append(
+                discord.SelectOption(
+                    label=label[:100],
+                    value=user_id_str,
+                    default=user_id_str == self.selected_user_id,
+                )
+            )
+        return options
+
+    def _refresh_from_quest(self) -> None:
+        self.pending_signups = [
+            signup for signup in self.quest.signups if signup.status is not PlayerStatus.SELECTED
+        ]
+        self.pending_map = {str(signup.user_id): signup for signup in self.pending_signups}
+
+        if self.selected_user_id and self.selected_user_id not in self.pending_map:
+            self.selected_user_id = None
+
+        if not self.selected_user_id and self.pending_signups:
+            self.selected_user_id = str(self.pending_signups[0].user_id)
+
+        options = self._build_options()
+        if not options:
+            self.select.options = [
+                discord.SelectOption(label="No pending requests", value="NONE", default=True)
+            ]
+            self.select.disabled = True
+            self.select.placeholder = "No pending requests"
+            self.accept_button.disabled = True
+            self.decline_button.disabled = True
+        else:
+            self.select.options = options
+            self.select.disabled = False
+            self.select.placeholder = "Select a request to review"
+            self.accept_button.disabled = False
+            self.decline_button.disabled = False
+
+    async def handle_accept(self, interaction: discord.Interaction) -> None:
+        signup = self.pending_map.get(self.selected_user_id or "")
+        if signup is None:
+            await interaction.response.send_message(
+                "Select a request to accept first.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            via_api = await self.cog._select_signup_via_api(
+                self.guild, self.quest, signup.user_id
+            )
+        except ValueError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+
+        if not via_api:
+            try:
+                self.quest.select_signup(signup.user_id)
+            except ValueError as exc:
+                await interaction.followup.send(str(exc), ephemeral=True)
+                return
+            self.cog._persist_quest(self.guild.id, self.quest)
+        else:
+            refreshed = self.cog._fetch_quest(self.guild.id, self.quest.quest_id)
+            if refreshed is not None:
+                self.quest = refreshed
+
+        await self.cog._sync_quest_announcement(
+            self.guild,
+            self.quest,
+            approved_by_display=self.reviewer.mention,
+            last_updated_at=datetime.now(timezone.utc),
+        )
+
+        await self._notify_player(signup, accepted=True)
+        await self._notify_channel(signup, accepted=True)
+        await send_demo_log(
+            self.cog.bot,
+            self.guild,
+            f"{self.reviewer.mention} accepted {self.cog._format_signup_label(self.guild.id, signup)} for `{self.quest.title or self.quest.quest_id}`",
+        )
+
+        self._refresh_from_quest()
+        await interaction.message.edit(
+            content=self.render_panel_text(), view=self
+        )
+
+        await interaction.followup.send(
+            f"Accepted {self.cog._format_signup_label(self.guild.id, signup)}.",
+            ephemeral=True,
+        )
+
+    async def handle_decline(self, interaction: discord.Interaction) -> None:
+        signup = self.pending_map.get(self.selected_user_id or "")
+        if signup is None:
+            await interaction.response.send_message(
+                "Select a request to decline first.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            via_api = await self.cog._remove_signup_via_api(
+                self.guild, self.quest, signup.user_id
+            )
+        except ValueError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+
+        if not via_api:
+            try:
+                self.quest.remove_signup(signup.user_id)
+            except ValueError as exc:
+                await interaction.followup.send(str(exc), ephemeral=True)
+                return
+            self.cog._persist_quest(self.guild.id, self.quest)
+        else:
+            refreshed = self.cog._fetch_quest(self.guild.id, self.quest.quest_id)
+            if refreshed is not None:
+                self.quest = refreshed
+
+        await self.cog._sync_quest_announcement(
+            self.guild,
+            self.quest,
+            last_updated_at=datetime.now(timezone.utc),
+        )
+
+        await self._notify_player(signup, accepted=False)
+        await self._notify_channel(signup, accepted=False)
+        await send_demo_log(
+            self.cog.bot,
+            self.guild,
+            f"{self.reviewer.mention} declined {self.cog._format_signup_label(self.guild.id, signup)} for `{self.quest.title or self.quest.quest_id}`",
+        )
+
+        self._refresh_from_quest()
+        await interaction.message.edit(
+            content=self.render_panel_text(), view=self
+        )
+
+        await interaction.followup.send(
+            f"Declined {self.cog._format_signup_label(self.guild.id, signup)}.",
+            ephemeral=True,
+        )
+
+    async def _notify_player(self, signup: PlayerSignUp, *, accepted: bool) -> None:
+        member = self.guild.get_member(signup.user_id.number)
+        if member is None:
+            try:
+                member = await self.guild.fetch_member(signup.user_id.number)
+            except Exception:
+                member = None
+        if member is None:
+            return
+
+        quest_name = self.quest.title or str(self.quest.quest_id)
+        character_label = str(signup.character_id)
+        if accepted:
+            text = (
+                f"Good news! {self.reviewer.display_name} approved your request to join "
+                f"`{quest_name}` with `{character_label}`."
+            )
+        else:
+            text = (
+                f"Your request to join `{quest_name}` with `{character_label}` was declined "
+                f"by {self.reviewer.display_name}."
+            )
+
+        try:
+            await member.send(text)
+        except Exception:
+            pass
+
+    async def _notify_channel(self, signup: PlayerSignUp, *, accepted: bool) -> None:
+        try:
+            channel = self.guild.get_channel(int(self.quest.channel_id))
+            if channel is None:
+                channel = await self.guild.fetch_channel(int(self.quest.channel_id))
+        except Exception:
+            channel = None
+
+        if channel is None:
+            return
+
+        action = "accepted" if accepted else "declined"
+        label = self.cog._format_signup_label(self.guild.id, signup)
+        try:
+            await channel.send(
+                f"{self.reviewer.mention} {action} {label} for quest `{self.quest.title or self.quest.quest_id}`."
+            )
+        except Exception:
+            pass
+
+
+class SignupPendingSelect(discord.ui.Select):
+    def __init__(self, parent: SignupDecisionView) -> None:
+        self.parent = parent
+        options = parent._build_options()
+        if not options:
+            options = [discord.SelectOption(label="No pending requests", value="NONE")]
+            disabled = True
+        else:
+            disabled = False
+        super().__init__(
+            placeholder="Select a request to review",
+            min_values=1,
+            max_values=1,
+            options=options,
+            disabled=disabled,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if self.disabled:
+            await interaction.response.send_message(
+                "No pending requests to review.", ephemeral=True
+            )
+            return
+
+        value = self.values[0]
+        if value == "NONE":
+            await interaction.response.send_message(
+                "No pending requests to review.", ephemeral=True
+            )
+            return
+
+        self.parent.selected_user_id = value
+        self.parent._refresh_from_quest()
+        await interaction.response.edit_message(
+            content=self.parent.render_panel_text(), view=self.parent
+        )
+
+
+class SignupApproveButton(discord.ui.Button):
+    def __init__(self) -> None:
+        super().__init__(label="Accept", style=discord.ButtonStyle.success)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view = self.view
+        if isinstance(view, SignupDecisionView):
+            await view.handle_accept(interaction)
+
+
+class SignupDeclineButton(discord.ui.Button):
+    def __init__(self) -> None:
+        super().__init__(label="Decline", style=discord.ButtonStyle.danger)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view = self.view
+        if isinstance(view, SignupDecisionView):
+            await view.handle_decline(interaction)
+
+
 class QuestCommandsCog(commands.Cog):
     """Slash commands for quest lifecycle management."""
 
@@ -419,6 +786,10 @@ class QuestCommandsCog(commands.Cog):
                     continue
         return str(user_id)
 
+    def _format_signup_label(self, guild_id: int, signup: PlayerSignUp) -> str:
+        user_display = self._lookup_user_display(guild_id, signup.user_id)
+        return f"{user_display} — {str(signup.character_id)}"
+
     def _quest_to_embed_data(
         self,
         quest: Quest,
@@ -430,7 +801,6 @@ class QuestCommandsCog(commands.Cog):
     ) -> QuestEmbedData:
         roster_selected: list[str] = []
         roster_pending: list[str] = []
-
         for signup in quest.signups:
             label = (
                 f"{self._lookup_user_display(quest.guild_id, signup.user_id)} — {str(signup.character_id)}"
@@ -975,6 +1345,146 @@ class QuestCommandsCog(commands.Cog):
             )
             return False
 
+    async def _add_signup_via_api(
+        self,
+        guild: discord.Guild,
+        quest: Quest,
+        user: User,
+        character_id: CharacterID,
+    ) -> bool:
+        if not QUEST_API_BASE_URL:
+            return False
+
+        base_url = QUEST_API_BASE_URL.rstrip("/")
+        url = f"{base_url}/v1/guilds/{guild.id}/quests/{quest.quest_id}/signups"
+        payload = {
+            "user_id": str(user.user_id),
+            "character_id": str(character_id),
+        }
+
+        timeout = aiohttp.ClientTimeout(total=10)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, json=payload) as resp:
+                    if resp.status in (200, 201):
+                        return True
+
+                    raw = await resp.text()
+                    detail = self._extract_api_detail(raw)
+
+                    if resp.status in (400, 404):
+                        message = self._normalize_signup_error(
+                            detail or "Unable to submit signup request."
+                        )
+                        raise ValueError(message)
+
+                    logging.warning(
+                        "Signup API returned %s for quest %s in guild %s: %s",
+                        resp.status,
+                        quest.quest_id,
+                        guild.id,
+                        detail or raw,
+                    )
+                    return False
+        except ValueError:
+            raise
+        except Exception as exc:
+            logging.warning(
+                "Signup API request failed for quest %s in guild %s: %s",
+                quest.quest_id,
+                guild.id,
+                exc,
+            )
+            return False
+
+    async def _select_signup_via_api(
+        self,
+        guild: discord.Guild,
+        quest: Quest,
+        user_id: UserID,
+    ) -> bool:
+        if not QUEST_API_BASE_URL:
+            return False
+
+        base_url = QUEST_API_BASE_URL.rstrip("/")
+        url = f"{base_url}/v1/guilds/{guild.id}/quests/{quest.quest_id}/signups/{user_id}:select"
+
+        timeout = aiohttp.ClientTimeout(total=10)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url) as resp:
+                    if resp.status in (200, 201):
+                        return True
+
+                    raw = await resp.text()
+                    detail = self._extract_api_detail(raw)
+
+                    if resp.status in (400, 404):
+                        raise ValueError(detail or "Unable to accept signup request.")
+
+                    logging.warning(
+                        "Signup select API returned %s for quest %s in guild %s: %s",
+                        resp.status,
+                        quest.quest_id,
+                        guild.id,
+                        detail or raw,
+                    )
+                    return False
+        except ValueError:
+            raise
+        except Exception as exc:
+            logging.warning(
+                "Signup select API request failed for quest %s in guild %s: %s",
+                quest.quest_id,
+                guild.id,
+                exc,
+            )
+            return False
+
+    async def _remove_signup_via_api(
+        self,
+        guild: discord.Guild,
+        quest: Quest,
+        user_id: UserID,
+    ) -> bool:
+        if not QUEST_API_BASE_URL:
+            return False
+
+        base_url = QUEST_API_BASE_URL.rstrip("/")
+        url = f"{base_url}/v1/guilds/{guild.id}/quests/{quest.quest_id}/signups/{user_id}"
+
+        timeout = aiohttp.ClientTimeout(total=10)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.delete(url) as resp:
+                    if resp.status in (200, 204):
+                        return True
+
+                    raw = await resp.text()
+                    detail = self._extract_api_detail(raw)
+
+                    if resp.status in (400, 404):
+                        raise ValueError(detail or "Unable to remove signup.")
+
+                    logging.warning(
+                        "Signup removal API returned %s for quest %s in guild %s: %s",
+                        resp.status,
+                        quest.quest_id,
+                        guild.id,
+                        detail or raw,
+                    )
+                    return False
+        except ValueError:
+            raise
+        except Exception as exc:
+            logging.warning(
+                "Signup removal API request failed for quest %s in guild %s: %s",
+                quest.quest_id,
+                guild.id,
+                exc,
+            )
+            return False
+
     def _quest_from_doc(self, guild_id: int, doc: dict) -> Quest:
         quest_id_doc = doc.get("quest_id", {})
         ref_doc = doc.get("referee_id", {})
@@ -1130,6 +1640,34 @@ class QuestCommandsCog(commands.Cog):
             choices.append(app_commands.Choice(name=f"{label} — {name}", value=label))
         return choices[:25]
 
+    @staticmethod
+    def _normalize_signup_error(message: str) -> str:
+        if "already signed up" in message.lower():
+            return "You already requested to join this quest."
+        return message
+
+    @staticmethod
+    def _extract_api_detail(raw: str) -> Optional[str]:
+        raw = (raw or "").strip()
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return raw
+        if isinstance(data, dict):
+            detail = data.get("detail")
+            if isinstance(detail, list) and detail:
+                first = detail[0]
+                if isinstance(first, dict):
+                    return str(first.get("msg") or raw)
+                return str(first)
+            if isinstance(detail, dict):
+                return str(detail.get("msg") or detail)
+            if detail is not None:
+                return str(detail)
+        return raw
+
     async def _execute_join(
         self,
         interaction: discord.Interaction,
@@ -1162,11 +1700,24 @@ class QuestCommandsCog(commands.Cog):
             raise ValueError("Signups are closed for this quest.")
 
         try:
-            quest.add_signup(user.user_id, character_id)
+            persisted_via_api = await self._add_signup_via_api(
+                guild, quest, user, character_id
+            )
         except ValueError as exc:
             raise ValueError(str(exc)) from exc
 
-        self._persist_quest(guild.id, quest)
+        if not persisted_via_api:
+            try:
+                quest.add_signup(user.user_id, character_id)
+            except ValueError as exc:
+                message = self._normalize_signup_error(str(exc))
+                raise ValueError(message) from exc
+
+            self._persist_quest(guild.id, quest)
+        else:
+            refreshed = self._fetch_quest(guild.id, quest_id)
+            if refreshed is not None:
+                quest = refreshed
 
         await self._sync_quest_announcement(
             guild,
@@ -1174,32 +1725,14 @@ class QuestCommandsCog(commands.Cog):
             last_updated_at=datetime.now(timezone.utc),
         )
 
-        channel = guild.get_channel(int(quest.channel_id))
-        if channel is None:
-            try:
-                channel = await guild.fetch_channel(int(quest.channel_id))
-            except Exception as exc:  # pragma: no cover - best effort logging
-                logging.debug(
-                    "Unable to fetch quest channel %s in guild %s: %s",
-                    quest.channel_id,
-                    guild.id,
-                    exc,
-                )
-                channel = None
-
-        if channel is not None:
-            await channel.send(
-                f"{member.mention} joined quest `{quest.title or quest.quest_id}` with character `{str(character_id)}`."
-            )
-
         await send_demo_log(
             self.bot,
             guild,
-            f"{member.mention} joined quest `{quest.title or quest.quest_id}` with `{str(character_id)}`",
+            f"{member.mention} requested to join `{quest.title or quest.quest_id}` with `{str(character_id)}`",
         )
 
         return (
-            f"You have joined quest `{quest_id}` with character `{str(character_id)}`."
+            f"Signup request submitted for `{str(quest_id)}` with `{str(character_id)}`. The referee will review it soon."
         )
 
     async def _execute_leave(
@@ -1219,12 +1752,23 @@ class QuestCommandsCog(commands.Cog):
         if quest is None:
             raise ValueError("Quest not found.")
 
+        user_id = UserID(number=member.id)
+
         try:
-            quest.remove_signup(UserID(number=member.id))
+            removed_via_api = await self._remove_signup_via_api(guild, quest, user_id)
         except ValueError as exc:
             raise ValueError(str(exc)) from exc
 
-        self._persist_quest(guild.id, quest)
+        if not removed_via_api:
+            try:
+                quest.remove_signup(user_id)
+            except ValueError as exc:
+                raise ValueError(str(exc)) from exc
+            self._persist_quest(guild.id, quest)
+        else:
+            refreshed = self._fetch_quest(guild.id, quest_id)
+            if refreshed is not None:
+                quest = refreshed
 
         await self._sync_quest_announcement(
             guild,

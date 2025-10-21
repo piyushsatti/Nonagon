@@ -213,7 +213,10 @@ async def add_signup(guild_id: int, quest_id: str, payload: dict) -> APIQuest:
     try:
         quest.add_signup(user_id, character_id)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        message = str(exc)
+        if "already signed up" in message.lower():
+            message = "You already requested to join this quest."
+        raise HTTPException(status_code=400, detail=message)
 
     return await _persist_quest(guild_id, quest)
 

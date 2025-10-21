@@ -9,8 +9,8 @@ os.environ.setdefault("MONGODB_URI", "mongodb://localhost/test")
 
 from app.api.main import app
 from app.api.routers import quests as quests_router
-from app.domain.models.EntityIDModel import QuestID, UserID
-from app.domain.models.QuestModel import Quest
+from app.domain.models.EntityIDModel import CharacterID, QuestID, UserID
+from app.domain.models.QuestModel import PlayerSignUp, Quest
 from app.domain.models.UserModel import User
 
 
@@ -54,8 +54,11 @@ class _FakeUsersRepo:
 
 
 class _FakeCharactersRepo:
-    async def get(self, guild_id: int, character_id: str):  # pragma: no cover - unused
-        return None
+    def __init__(self) -> None:
+        self._store: Dict[Tuple[int, str], object] = {}
+
+    async def get(self, guild_id: int, character_id: str):
+        return self._store.get((guild_id, character_id))
 
 
 def test_create_quest_uses_existing_id_and_persists(monkeypatch) -> None:
@@ -122,3 +125,74 @@ def test_create_quest_requires_channel_and_raw(monkeypatch) -> None:
 
     assert response.status_code == 400
     assert "channel_id" in response.json()["detail"]
+
+
+def _setup_signup_env(monkeypatch):
+    fake_quests = _FakeQuestsRepo()
+    fake_users = _FakeUsersRepo()
+    fake_characters = _FakeCharactersRepo()
+
+    monkeypatch.setattr(quests_router, "quests_repo", fake_quests)
+    monkeypatch.setattr(quests_router, "users_repo", fake_users)
+    monkeypatch.setattr(quests_router, "characters_repo", fake_characters)
+
+    quest = Quest(
+        quest_id=QuestID.parse("QUES0001"),
+        guild_id=123,
+        referee_id=UserID(99),
+        channel_id="chan",
+        message_id="msg",
+        raw="Quest body",
+        title="Quest Title",
+        description=None,
+    )
+    fake_quests._store[(123, str(quest.quest_id))] = quest
+
+    player = User(user_id=UserID(42), guild_id=123)
+    player.enable_player()
+    character_id = CharacterID(number=7)
+    player.player.add_character(character_id)
+    fake_users._store[(123, str(player.user_id))] = player
+    fake_characters._store[(123, str(character_id))] = {"_id": "CHAR7"}
+
+    return fake_quests, fake_users, fake_characters, quest, player, character_id
+
+
+def test_add_signup_persists_request(monkeypatch) -> None:
+    fake_quests, _, _, quest, player, character_id = _setup_signup_env(monkeypatch)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/v1/guilds/{quest.guild_id}/quests/{quest.quest_id}/signups",
+        json={
+            "user_id": str(player.user_id),
+            "character_id": str(character_id),
+        },
+    )
+
+    assert response.status_code == 200
+    stored = fake_quests._store[(quest.guild_id, str(quest.quest_id))]
+    assert len(stored.signups) == 1
+    signup = stored.signups[0]
+    assert signup.user_id == player.user_id
+    assert signup.character_id == character_id
+
+
+def test_add_signup_duplicate_returns_friendly_message(monkeypatch) -> None:
+    fake_quests, _, _, quest, player, character_id = _setup_signup_env(monkeypatch)
+    quest.signups.append(
+        PlayerSignUp(user_id=player.user_id, character_id=character_id)
+    )
+
+    client = TestClient(app)
+
+    response = client.post(
+        f"/v1/guilds/{quest.guild_id}/quests/{quest.quest_id}/signups",
+        json={
+            "user_id": str(player.user_id),
+            "character_id": str(character_id),
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "You already requested to join this quest."
