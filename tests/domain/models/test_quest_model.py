@@ -8,6 +8,7 @@ from app.domain.models.EntityIDModel import UserID, CharacterID, QuestID
 def make_quest(now: datetime) -> Quest:
     return Quest(
         quest_id=QuestID(1),
+        guild_id=123,
         referee_id=UserID(99),
         channel_id="chan",
         message_id="msg",
@@ -31,6 +32,10 @@ def test_status_helpers_and_properties(now):
     assert q.status is QuestStatus.ANNOUNCED
     assert q.is_signup_open is True
 
+    q.set_draft()
+    assert q.status is QuestStatus.DRAFT
+    assert q.is_signup_open is False
+
     q.close_signups()
     assert q.status is QuestStatus.SIGNUP_CLOSED
     assert q.is_signup_open is False
@@ -44,6 +49,8 @@ def test_status_helpers_and_properties(now):
     q.set_completed()
     assert q.status is QuestStatus.COMPLETED
     assert q.is_summary_needed is True  # none linked yet
+
+    assert q.last_nudged_at is None
 
 
 def test_add_and_select_signup():

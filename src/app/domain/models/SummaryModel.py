@@ -21,15 +21,16 @@ class QuestSummary:
     author_id: UserID
     character_id: CharacterID
     quest_id: QuestID
-    guild_id: int | None = None
-
     # Content
     raw: str
     title: str
     description: str
+    created_on: datetime
+
+    # Scope
+    guild_id: int | None = None
 
     # Telemetry
-    created_on: datetime
     last_edited_at: datetime = None
     players: List[UserID] = field(default_factory=list)
     characters: List[CharacterID] = field(default_factory=list)

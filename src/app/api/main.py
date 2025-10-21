@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from app.api.routers.demo import router as demo_router
+from app.api.routers.quests import router as quests_router
 from app.api.routers.users import router as users_router
 
 log_dir = Path("/app/logs")
@@ -39,11 +40,9 @@ app.add_middleware(
 
 # Routers
 app.include_router(users_router)
+app.include_router(quests_router)
 app.include_router(demo_router, prefix="/v1")
 app.include_router(demo_router)
-# app.include_router(characters_router)
-# app.include_router(quests_router)
-# app.include_router(summaries_router)
 
 
 @app.get("/healthz")

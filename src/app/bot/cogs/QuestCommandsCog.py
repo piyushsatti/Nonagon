@@ -2,21 +2,238 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import aiohttp
 import discord
 from discord import app_commands
+from discord.abc import Messageable
 from discord.ext import commands
 from pymongo import ReturnDocument
 
-from app.bot.config import BOT_FLUSH_VIA_ADAPTER
+from app.bot.config import (
+    BOT_FLUSH_VIA_ADAPTER,
+    FORGE_CHANNEL_IDS,
+    QUEST_API_BASE_URL,
+    QUEST_BOARD_CHANNEL_ID,
+)
 from app.bot.utils.log_stream import send_demo_log
+from app.bot.utils.quest_embeds import QuestEmbedData, QuestEmbedRoster, build_quest_embed
 from app.domain.models.EntityIDModel import CharacterID, QuestID, UserID
 from app.domain.models.QuestModel import PlayerSignUp, PlayerStatus, Quest, QuestStatus
 from app.domain.models.UserModel import User
 from app.infra.mongo.guild_adapter import upsert_quest_sync
+
+
+class ForgeDraftView(discord.ui.View):
+    def __init__(self, cog: "QuestCommandsCog", message: discord.Message) -> None:
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.guild_id = message.guild.id if message.guild else 0
+        self.channel_id = message.channel.id
+        self.message_id = message.id
+        self.author_id = message.author.id
+
+    async def _ensure_referee(self, interaction: discord.Interaction) -> bool:
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "Forge actions are only available inside a guild.", ephemeral=True
+            )
+            return False
+
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Only the draft author can manage this quest.", ephemeral=True
+            )
+            return False
+
+        if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message(
+                "Only guild members can manage forge drafts.", ephemeral=True
+            )
+            return False
+
+        try:
+            user = await self.cog._get_cached_user(interaction.user)
+        except Exception:
+            await interaction.response.send_message(
+                "Unable to resolve your profile; please try again shortly.",
+                ephemeral=True,
+            )
+            return False
+
+        if not user.is_referee:
+            await interaction.response.send_message(
+                "You need the REFEREE role to manage quests.", ephemeral=True
+            )
+            return False
+
+        return True
+
+    async def _resolve_message(self, interaction: discord.Interaction) -> Optional[discord.Message]:
+        channel = interaction.guild.get_channel(self.channel_id) if interaction.guild else None
+        if channel is None and interaction.guild is not None:
+            try:
+                channel = await interaction.guild.fetch_channel(self.channel_id)
+            except Exception:
+                return None
+
+        if channel is None:
+            return None
+
+        try:
+            return await channel.fetch_message(self.message_id)
+        except Exception:
+            return None
+
+    def _preview_state(self) -> ForgePreviewState:
+        key = (self.guild_id, self.message_id)
+        state = self.cog._forge_previews.get(key)
+        if state is None:
+            state = ForgePreviewState()
+            self.cog._forge_previews[key] = state
+        return state
+
+    @discord.ui.button(label="Preview", style=discord.ButtonStyle.primary)
+    async def preview_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        if not await self._ensure_referee(interaction):
+            return
+
+        message = await self._resolve_message(interaction)
+        if message is None:
+            await interaction.response.send_message(
+                "Unable to locate the draft message.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        draft = self.cog._parse_forge_draft(message.content)
+        quest_id = f"DRAFT{self.message_id}"
+        embed = self.cog._draft_to_embed(draft, quest_id=quest_id, referee_display=interaction.user.mention)
+
+        state = self._preview_state()
+        preview_link: Optional[str] = None
+
+        if interaction.guild is not None:
+            thread = None
+            if state.thread_id:
+                thread = interaction.guild.get_thread(state.thread_id)
+                if thread is None:
+                    try:
+                        thread = await interaction.guild.fetch_channel(state.thread_id)
+                    except Exception:
+                        thread = None
+
+            if thread is None:
+                try:
+                    name = f"Quest Preview {interaction.user.display_name}"[:90]
+                    thread = await message.create_thread(name=name, auto_archive_duration=60)
+                    state.thread_id = thread.id
+                except Exception:
+                    thread = None
+
+            if thread is not None:
+                if state.preview_message_id:
+                    try:
+                        preview_message = await thread.fetch_message(state.preview_message_id)
+                        await preview_message.edit(embed=embed, content=None)
+                    except Exception:
+                        preview_message = await thread.send(embed=embed)
+                        state.preview_message_id = preview_message.id
+                else:
+                    preview_message = await thread.send(embed=embed)
+                    state.preview_message_id = preview_message.id
+
+                state.last_rendered_at = datetime.now(timezone.utc)
+                preview_link = thread.jump_url
+
+        if preview_link:
+            await interaction.followup.send(
+                f"Preview updated in [thread]({preview_link}).", ephemeral=True
+            )
+        else:
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="Approve", style=discord.ButtonStyle.success)
+    async def approve_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        if not await self._ensure_referee(interaction):
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        message = await self._resolve_message(interaction)
+        if message is None or interaction.guild is None:
+            await interaction.followup.send(
+                "Unable to locate the draft message for approval.", ephemeral=True
+            )
+            return
+
+        draft = self.cog._parse_forge_draft(message.content)
+
+        try:
+            result = await self.cog._approve_forge_draft(
+                interaction,
+                draft=draft,
+                author=interaction.user,
+                source_message=message,
+            )
+        except Exception as exc:
+            logging.exception("Forge approve failed: %s", exc)
+            await interaction.followup.send(
+                "Quest approval failed; please try again later.", ephemeral=True
+            )
+            return
+
+        if result is None:
+            await interaction.followup.send(
+                "Quest approval aborted; please review the draft details.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.followup.send(result, ephemeral=True)
+
+    @discord.ui.button(label="Discard", style=discord.ButtonStyle.danger)
+    async def discard_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        if not await self._ensure_referee(interaction):
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        message = await self._resolve_message(interaction)
+        if message is None:
+            await interaction.followup.send(
+                "Draft already removed.", ephemeral=True
+            )
+            return
+
+        await self.cog._discard_forge_draft(interaction, source_message=message)
+        await interaction.followup.send("Draft discarded.", ephemeral=True)
+
+
+
+@dataclass(slots=True)
+class ForgePreviewState:
+    thread_id: Optional[int] = None
+    preview_message_id: Optional[int] = None
+    last_rendered_at: Optional[datetime] = None
+
+
+@dataclass(slots=True)
+class ForgeDraft:
+    raw: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+    starting_at: Optional[datetime] = None
+    duration: Optional[timedelta] = None
+    image_url: Optional[str] = None
 
 
 class JoinQuestModal(discord.ui.Modal):
@@ -185,6 +402,444 @@ class QuestCommandsCog(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._forge_previews: dict[tuple[int, int], ForgePreviewState] = {}
+
+    # ---------- Quest Embed Helpers ----------
+
+    def _lookup_user_display(self, guild_id: int, user_id: UserID) -> str:
+        guild_entry = self.bot.guild_data.get(guild_id)
+        if guild_entry:
+            for cached in guild_entry.get("users", {}).values():
+                try:
+                    if cached.user_id == user_id:
+                        if cached.discord_id:
+                            return f"<@{cached.discord_id}>"
+                        return str(cached.user_id)
+                except AttributeError:
+                    continue
+        return str(user_id)
+
+    def _quest_to_embed_data(
+        self,
+        quest: Quest,
+        guild: Optional[discord.Guild],
+        *,
+        referee_display: Optional[str] = None,
+        approved_by_display: Optional[str] = None,
+        last_updated_at: Optional[datetime] = None,
+    ) -> QuestEmbedData:
+        roster_selected: list[str] = []
+        roster_pending: list[str] = []
+
+        for signup in quest.signups:
+            label = (
+                f"{self._lookup_user_display(quest.guild_id, signup.user_id)} — {str(signup.character_id)}"
+            )
+            if signup.status is PlayerStatus.SELECTED:
+                roster_selected.append(label)
+            else:
+                roster_pending.append(label)
+
+        roster = QuestEmbedRoster(selected=roster_selected, pending=roster_pending)
+
+        referee_label = referee_display
+        if referee_label is None:
+            referee_label = self._lookup_user_display(quest.guild_id, quest.referee_id)
+
+        data = QuestEmbedData(
+            quest_id=str(quest.quest_id),
+            title=quest.title,
+            description=quest.description,
+            status=quest.status,
+            starting_at=quest.starting_at,
+            duration=quest.duration,
+            referee_display=referee_label,
+            roster=roster,
+            image_url=quest.image_url,
+            last_updated_at=last_updated_at or datetime.now(timezone.utc),
+            approved_by_display=approved_by_display,
+        )
+        return data
+
+    def _build_quest_embed(
+        self,
+        quest: Quest,
+        guild: Optional[discord.Guild],
+        *,
+        referee_display: Optional[str] = None,
+        approved_by_display: Optional[str] = None,
+        last_updated_at: Optional[datetime] = None,
+    ) -> discord.Embed:
+        data = self._quest_to_embed_data(
+            quest,
+            guild,
+            referee_display=referee_display,
+            approved_by_display=approved_by_display,
+            last_updated_at=last_updated_at,
+        )
+        return build_quest_embed(data)
+
+    def _is_forge_channel(self, channel: Optional[Messageable]) -> bool:
+        if channel is None:
+            return False
+
+        channel_id = getattr(channel, "id", None)
+        if channel_id is None:
+            return False
+
+        if FORGE_CHANNEL_IDS:
+            return int(channel_id) in FORGE_CHANNEL_IDS
+
+        return False
+
+    def _draft_to_embed(
+        self,
+        draft: ForgeDraft,
+        *,
+        quest_id: str,
+        referee_display: str,
+        status: QuestStatus = QuestStatus.DRAFT,
+    ) -> discord.Embed:
+        roster = QuestEmbedRoster()
+        data = QuestEmbedData(
+            quest_id=quest_id,
+            title=draft.title,
+            description=draft.description,
+            status=status,
+            starting_at=draft.starting_at,
+            duration=draft.duration,
+            referee_display=referee_display,
+            roster=roster,
+            image_url=draft.image_url,
+            last_updated_at=datetime.now(timezone.utc),
+            approved_by_display=referee_display,
+        )
+        return build_quest_embed(data)
+
+    def _parse_forge_draft(self, raw: str) -> ForgeDraft:
+        title: Optional[str] = None
+        description_lines: list[str] = []
+        starting_at: Optional[datetime] = None
+        duration: Optional[timedelta] = None
+        image_url: Optional[str] = None
+
+        for line in raw.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                description_lines.append(stripped)
+                continue
+
+            key, sep, value = stripped.partition(":")
+            if sep and key.lower() in {"title", "name", "quest"}:
+                if not title:
+                    title = value.strip() or None
+                continue
+
+            if sep and key.lower() in {"start", "starts", "when"}:
+                parsed = self._parse_start_datetime(value)
+                if parsed is not None:
+                    starting_at = parsed
+                    continue
+
+            if sep and key.lower() in {"duration", "length"}:
+                parsed_duration = self._parse_duration(value)
+                if parsed_duration is not None:
+                    duration = parsed_duration
+                    continue
+
+            if sep and key.lower() in {"image", "cover", "thumbnail"}:
+                url = value.strip()
+                if url.lower().startswith("http"):
+                    image_url = url
+                    continue
+
+            description_lines.append(stripped)
+
+        if title is None:
+            for idx, line in enumerate(description_lines):
+                if line:
+                    title = line
+                    description_lines = description_lines[idx + 1 :]
+                    break
+
+        description = "\n".join(description_lines).strip() or None
+
+        return ForgeDraft(
+            raw=raw,
+            title=title,
+            description=description,
+            starting_at=starting_at,
+            duration=duration,
+            image_url=image_url,
+        )
+
+    def _parse_start_datetime(self, value: str) -> Optional[datetime]:
+        text = value.strip()
+        if not text:
+            return None
+
+        t_match = re.search(r"<t:(\d+)", text)
+        if t_match:
+            seconds = int(t_match.group(1))
+            return datetime.fromtimestamp(seconds, tz=timezone.utc)
+
+        normalized = text.replace("UTC", "+00:00").replace("utc", "+00:00")
+        for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
+            try:
+                dt = datetime.strptime(normalized, fmt)
+                return dt.replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+
+        try:
+            dt = datetime.fromisoformat(normalized)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except ValueError:
+            return None
+
+    def _parse_duration(self, value: str) -> Optional[timedelta]:
+        text = value.strip().lower()
+        if not text:
+            return None
+
+        hours = 0
+        minutes = 0
+        match = re.findall(r"(\d+)\s*h", text)
+        if match:
+            hours = sum(int(m) for m in match)
+        match_min = re.findall(r"(\d+)\s*m", text)
+        if match_min:
+            minutes = sum(int(m) for m in match_min)
+
+        if hours == 0 and minutes == 0:
+            try:
+                hours = int(text)
+            except ValueError:
+                return None
+
+        return timedelta(hours=hours, minutes=minutes)
+
+    async def _cleanup_forge_preview(
+        self, guild: discord.Guild, message_id: int
+    ) -> None:
+        state = self._forge_previews.pop((guild.id, message_id), None)
+        if state is None:
+            return
+
+        if state.thread_id:
+            thread = guild.get_thread(state.thread_id)
+            if thread is None:
+                try:
+                    thread = await guild.fetch_channel(state.thread_id)
+                except Exception:
+                    thread = None
+            if thread is not None:
+                try:
+                    await thread.delete()
+                except Exception:
+                    pass
+
+    async def _resolve_board_channel(
+        self, guild: discord.Guild, fallback: discord.TextChannel
+    ) -> Messageable:
+        if QUEST_BOARD_CHANNEL_ID:
+            channel = guild.get_channel(QUEST_BOARD_CHANNEL_ID)
+            if channel is None:
+                try:
+                    channel = await guild.fetch_channel(QUEST_BOARD_CHANNEL_ID)
+                except Exception:
+                    channel = None
+            if channel is not None:
+                return channel
+        return fallback
+
+    async def _approve_forge_draft(
+        self,
+        interaction: discord.Interaction,
+        *,
+        draft: ForgeDraft,
+        author: discord.Member,
+        source_message: discord.Message,
+    ) -> Optional[str]:
+        guild = interaction.guild
+        if guild is None:
+            return None
+
+        board_channel = await self._resolve_board_channel(
+            guild, fallback=source_message.channel
+        )
+
+        quest_id = self._next_quest_id(guild.id)
+
+        quest = Quest(
+            quest_id=quest_id,
+            guild_id=guild.id,
+            referee_id=UserID(number=author.id),
+            channel_id=str(board_channel.id),
+            message_id="0",
+            raw=draft.raw,
+            title=draft.title,
+            description=draft.description,
+            starting_at=draft.starting_at,
+            duration=draft.duration,
+            image_url=draft.image_url,
+            status=QuestStatus.ANNOUNCED,
+        )
+
+        try:
+            quest.validate_quest()
+        except ValueError as exc:
+            raise ValueError(f"Quest validation failed: {exc}")
+
+        embed = self._draft_to_embed(
+            draft,
+            quest_id=str(quest_id),
+            referee_display=author.mention,
+            status=QuestStatus.ANNOUNCED,
+        )
+
+        announcement = await board_channel.send(
+            content=f"{author.mention} scheduled a quest!",
+            embed=embed,
+            view=QuestSignupView(self, str(quest_id)),
+        )
+
+        quest.message_id = str(announcement.id)
+        quest.channel_id = str(announcement.channel.id)
+        persisted_via_api = await self._persist_quest_via_api(guild, quest)
+        if not persisted_via_api:
+            self._persist_quest(guild.id, quest)
+
+        await self._cleanup_forge_preview(guild, source_message.id)
+
+        try:
+            await source_message.edit(view=None)
+        except Exception:
+            pass
+
+        await send_demo_log(
+            self.bot,
+            guild,
+            f"Quest `{quest.quest_id}` approved by {author.mention} in {board_channel.mention}",
+        )
+
+        return (
+            f"Quest `{quest.quest_id}` announced in {announcement.channel.mention}."
+        )
+
+    async def _discard_forge_draft(
+        self,
+        interaction: discord.Interaction,
+        *,
+        source_message: discord.Message,
+    ) -> None:
+        if interaction.guild is None:
+            return
+
+        await self._cleanup_forge_preview(interaction.guild, source_message.id)
+
+        try:
+            await source_message.edit(view=None)
+        except Exception:
+            pass
+
+    @commands.Cog.listener("on_message")
+    async def _on_message_forge_hook(self, message: discord.Message) -> None:
+        if message.author.bot:
+            return
+
+        if message.guild is None:
+            return
+
+        if not self._is_forge_channel(message.channel):
+            return
+
+        if not isinstance(message.author, discord.Member):
+            return
+
+        try:
+            user = await self._get_cached_user(message.author)
+        except Exception:
+            return
+
+        if not user.is_referee:
+            return
+
+        if message.components:
+            return
+
+        view = ForgeDraftView(self, message)
+        try:
+            await message.edit(view=view)
+            logging.info(
+                "Attached forge view to message %s in guild %s channel %s",
+                message.id,
+                message.guild.id,
+                message.channel.id,
+            )
+        except Exception as exc:
+            logging.debug(
+                "Unable to attach forge view for message %s in guild %s: %s",
+                message.id,
+                message.guild.id,
+                exc,
+            )
+
+
+    async def _sync_quest_announcement(
+        self,
+        guild: discord.Guild,
+        quest: Quest,
+        *,
+        approved_by_display: Optional[str] = None,
+        last_updated_at: Optional[datetime] = None,
+        view: Optional[discord.ui.View] = None,
+    ) -> None:
+        channel = guild.get_channel(int(quest.channel_id))
+        if channel is None:
+            try:
+                channel = await guild.fetch_channel(int(quest.channel_id))
+            except Exception as exc:  # pragma: no cover - defensive log
+                logging.debug(
+                    "Unable to resolve quest channel %s in guild %s: %s",
+                    quest.channel_id,
+                    guild.id,
+                    exc,
+                )
+                return
+
+        try:
+            message = await channel.fetch_message(int(quest.message_id))
+        except Exception as exc:  # pragma: no cover - defensive log
+            logging.debug(
+                "Unable to fetch quest message %s in guild %s: %s",
+                quest.message_id,
+                guild.id,
+                exc,
+            )
+            return
+
+        embed = self._build_quest_embed(
+            quest,
+            guild,
+            approved_by_display=approved_by_display,
+            last_updated_at=last_updated_at,
+        )
+
+        try:
+            resolved_view = view
+            if resolved_view is None and quest.is_signup_open:
+                resolved_view = QuestSignupView(self, str(quest.quest_id))
+            await message.edit(embed=embed, view=resolved_view)
+        except Exception as exc:  # pragma: no cover - defensive log
+            logging.debug(
+                "Unable to update quest announcement %s in guild %s: %s",
+                quest.quest_id,
+                guild.id,
+                exc,
+            )
 
     async def _ensure_guild_cache(self, guild: discord.Guild) -> None:
         if guild.id not in self.bot.guild_data:
@@ -273,6 +928,53 @@ class QuestCommandsCog(commands.Cog):
             upsert=True,
         )
 
+    async def _persist_quest_via_api(self, guild: discord.Guild, quest: Quest) -> bool:
+        if not QUEST_API_BASE_URL:
+            return False
+
+        base_url = QUEST_API_BASE_URL.rstrip("/")
+        url = f"{base_url}/v1/guilds/{guild.id}/quests"
+        payload: dict[str, object] = {
+            "quest_id": str(quest.quest_id),
+            "referee_id": str(quest.referee_id),
+            "raw": quest.raw,
+            "title": quest.title,
+            "description": quest.description,
+            "image_url": quest.image_url,
+            "linked_quests": [str(qid) for qid in quest.linked_quests],
+            "linked_summaries": [str(sid) for sid in quest.linked_summaries],
+        }
+
+        if quest.starting_at is not None:
+            payload["starting_at"] = quest.starting_at.isoformat()
+
+        if quest.duration is not None:
+            payload["duration_hours"] = int(quest.duration.total_seconds() // 3600)
+
+        params = {
+            "channel_id": quest.channel_id,
+            "message_id": quest.message_id,
+        }
+
+        timeout = aiohttp.ClientTimeout(total=10)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, json=payload, params=params) as resp:
+                    if resp.status != 201:
+                        text = await resp.text()
+                        raise RuntimeError(
+                            f"Quest API persistence failed with {resp.status}: {text}"
+                        )
+            return True
+        except Exception as exc:
+            logging.warning(
+                "Falling back to direct quest persistence for %s in guild %s: %s",
+                quest.quest_id,
+                guild.id,
+                exc,
+            )
+            return False
+
     def _quest_from_doc(self, guild_id: int, doc: dict) -> Quest:
         quest_id_doc = doc.get("quest_id", {})
         ref_doc = doc.get("referee_id", {})
@@ -306,6 +1008,7 @@ class QuestCommandsCog(commands.Cog):
 
         quest.started_at = doc.get("started_at")
         quest.ended_at = doc.get("ended_at")
+        quest.last_nudged_at = doc.get("last_nudged_at")
 
         signups: list[PlayerSignUp] = []
         for entry in doc.get("signups", []):
@@ -465,6 +1168,12 @@ class QuestCommandsCog(commands.Cog):
 
         self._persist_quest(guild.id, quest)
 
+        await self._sync_quest_announcement(
+            guild,
+            quest,
+            last_updated_at=datetime.now(timezone.utc),
+        )
+
         channel = guild.get_channel(int(quest.channel_id))
         if channel is None:
             try:
@@ -516,6 +1225,12 @@ class QuestCommandsCog(commands.Cog):
             raise ValueError(str(exc)) from exc
 
         self._persist_quest(guild.id, quest)
+
+        await self._sync_quest_announcement(
+            guild,
+            quest,
+            last_updated_at=datetime.now(timezone.utc),
+        )
 
         channel = guild.get_channel(int(quest.channel_id))
         if channel is None:
@@ -656,35 +1371,12 @@ class QuestCommandsCog(commands.Cog):
         duration = timedelta(hours=int(duration_hours))
         raw_markdown = f"## {title}\n\n{description or 'No description provided.'}"
 
-        embed = discord.Embed(
-            title=title,
-            description=description or "No description provided.",
-            colour=discord.Color.blurple(),
-        )
-        start_epoch = int(start_time.timestamp())
-        embed.add_field(
-            name="Starts",
-            value=f"<t:{start_epoch}:F>",
-            inline=True,
-        )
-        embed.add_field(name="Countdown", value=f"<t:{start_epoch}:R>", inline=True)
-        embed.add_field(name="Duration", value=f"{int(duration_hours)}h", inline=True)
-        embed.set_footer(text=f"Quest ID: {quest_id}")
-        if image_url:
-            embed.set_image(url=image_url)
-
-        announcement = await interaction.channel.send(
-            content=f"{member.mention} scheduled a quest!",
-            embed=embed,
-            view=QuestSignupView(self, str(quest_id)),
-        )
-
         quest = Quest(
             quest_id=quest_id,
             guild_id=interaction.guild.id,
             referee_id=user.user_id,
-            channel_id=str(announcement.channel.id),
-            message_id=str(announcement.id),
+            channel_id=str(interaction.channel.id),
+            message_id="",
             raw=raw_markdown,
             title=title,
             description=description,
@@ -696,11 +1388,26 @@ class QuestCommandsCog(commands.Cog):
         try:
             quest.validate_quest()
         except ValueError as exc:
-            await announcement.delete()
             await interaction.followup.send(
                 f"Quest validation failed: {exc}", ephemeral=True
             )
             return
+
+        embed = self._build_quest_embed(
+            quest,
+            interaction.guild,
+            referee_display=member.mention,
+            approved_by_display=member.mention,
+        )
+
+        announcement = await interaction.channel.send(
+            content=f"{member.mention} scheduled a quest!",
+            embed=embed,
+            view=QuestSignupView(self, str(quest_id)),
+        )
+
+        quest.channel_id = str(announcement.channel.id)
+        quest.message_id = str(announcement.id)
 
         self._persist_quest(interaction.guild.id, quest)
         logging.info(
@@ -831,6 +1538,13 @@ class QuestCommandsCog(commands.Cog):
         quest.started_at = datetime.now(timezone.utc)
 
         self._persist_quest(interaction.guild.id, quest)
+
+        await self._sync_quest_announcement(
+            interaction.guild,
+            quest,
+            last_updated_at=quest.started_at,
+            view=None,
+        )
         logging.info(
             "Quest %s started by %s in guild %s",
             quest_id_obj,
@@ -898,6 +1612,13 @@ class QuestCommandsCog(commands.Cog):
         quest.ended_at = datetime.now(timezone.utc)
 
         self._persist_quest(interaction.guild.id, quest)
+
+        await self._sync_quest_announcement(
+            interaction.guild,
+            quest,
+            last_updated_at=quest.ended_at,
+            view=None,
+        )
         logging.info(
             "Quest %s ended by %s in guild %s",
             quest_id_obj,

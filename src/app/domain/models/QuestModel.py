@@ -9,6 +9,7 @@ from app.domain.models.EntityIDModel import CharacterID, QuestID, SummaryID, Use
 
 
 class QuestStatus(Enum):
+    DRAFT = "DRAFT"
     ANNOUNCED = "ANNOUNCED"
     SIGNUP_CLOSED = "SIGNUP_CLOSED"
     COMPLETED = "COMPLETED"
@@ -46,6 +47,7 @@ class Quest:
     started_at: datetime = None
     ended_at: datetime = None
     signups: List[PlayerSignUp] = field(default_factory=list)
+    last_nudged_at: datetime = None
 
     # ------- Status Helpers -------
     def set_completed(self) -> None:
@@ -56,6 +58,9 @@ class Quest:
 
     def set_announced(self) -> None:
         self.status = QuestStatus.ANNOUNCED
+
+    def set_draft(self) -> None:
+        self.status = QuestStatus.DRAFT
 
     def close_signups(self) -> None:
         self.status = QuestStatus.SIGNUP_CLOSED

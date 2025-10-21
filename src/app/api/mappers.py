@@ -29,7 +29,6 @@ from app.domain.models.QuestModel import (
 from app.domain.models.QuestModel import (
     QuestStatus as DQuestStatus,
 )
-from app.domain.models.SummaryModel import QuestSummary as DSumm
 
 # ---- Domain models ----
 from app.domain.models.UserModel import User as DUser
@@ -151,7 +150,9 @@ def quest_to_api(q: DQuest) -> APIQuest:
 # ---------- summaries ----------
 
 
-def summary_to_api(s: DSumm) -> APISummary:
+def summary_to_api(s):
+    from app.domain.models.SummaryModel import QuestSummary as DSumm  # lazy import
+
     # NOTE: your schema field is spelled “descroption”; we map domain.description to that name.
     return APISummary(
         summary_id=str(s.summary_id),
