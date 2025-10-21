@@ -14,7 +14,7 @@ This document outlines the Product Requirements Document (PRD) for the Nonagon D
 
 **Status**: Draft
 
-**Last Updated**: 25 Aug 2025 (Roadmap refresh; see Experimental Delta below)
+**Last Updated**: 21 Oct 2025 (EP5-S3 state cues + EP6 `/lookup` launch)
 
 **Contributors**: Piyush Satti
 
@@ -100,9 +100,10 @@ This document outlines the Product Requirements Document (PRD) for the Nonagon D
 
 ## 7. Epics & Stories Breakdown
 **Priority Roadmap**
-- P1: EP1 Quest Forge Flow, EP2 Controlled Sign-Up Management, EP4 Friendly Player Registration Flow, EP3 Nudge Button, EP7 External Quest IDs
+
+- P1: EP1 Quest Forge Flow, EP2 Controlled Sign-Up Management, EP3 Nudge Button, EP5 Simple UI Improvements, EP7 External Quest IDs
 - P2: EP6 `/lookup` Command
-- P3: EP5 Simple UI Improvements, EP8 Demo Markdown
+- Deferred: EP4 Friendly Player Registration Flow (resume after EP5)
 
 Note: Execute epics sequentially within their priority band to reduce Discord UI churn and repeated QA.
 
@@ -299,7 +300,9 @@ Given a player already applied, When they request again, Then an error returns a
   - [x] Add unit tests using logging doubles.  
   - [x] Update moderation SOP docs.
 
-### Epic 4: Friendly Player Registration Flow (P1)
+### Epic 4: Friendly Player Registration Flow (Deferred)
+
+> **Status**: Paused. Resume after Epic 5 completes; keep stories in backlog for future planning.
 **Goal**: Onboard first-time players without friction.  
 **Scope**: Character detection, quick-create modal, auto-continue signup.  
 **Out of Scope**: Full character profile capture in quick flow.  
@@ -367,18 +370,18 @@ Given I have characters, When I request to join, Then the dropdown lists my char
 **Milestones**: Embed polish -> Role gating -> State cues -> Thread previews.  
 **NFRs**: No regression to existing commands.
 
-**Story EP5-S1**  
-As a Member, I want emoji section headers so quest embeds are scannable.  
-**Acceptance Criteria**  
-Given a quest embed, When rendered, Then it shows [Target emoji] Quest, [Party emoji] Players, and [Clock emoji] Time sections.  
-**DoD**  
-- Embed builder centralized  
-- Legacy commands reuse builder  
-- Snapshot tests added  
-**Tasks**  
-- Refactor embed builder into helper.  
-- Update preview/announce flows to reuse helper.  
-- Add tests verifying section headers.
+- [x] **Story EP5-S1**  
+  As a Member, I want emoji section headers so quest embeds are scannable.  
+  **Acceptance Criteria**  
+  Given a quest embed, When rendered, Then it shows [Target emoji] Quest, [Party emoji] Players, and [Clock emoji] Time sections.  
+  **DoD**  
+  - Embed builder centralized  
+  - Legacy commands reuse builder  
+  - Snapshot tests added  
+  **Tasks**  
+  - [x] Refactor embed builder into helper.  
+  - [x] Update preview/announce flows to reuse helper.  
+  - [x] Add tests verifying section headers.
 
 **Story EP5-S2**  
 As a Player, I want confirmations to be ephemeral so channels stay clean.  
@@ -389,22 +392,22 @@ Given I interact with quest UI, When responses send, Then they're ephemeral unle
 - Update to ephemeral where appropriate  
 - Logging includes interaction outcomes  
 **Tasks**  
-- Review join/leave/accept flows.  
-- Toggle ephemeral=True in callbacks.  
-- Add integration tests.
+- [x] Review join/leave/accept flows (audit confirmed existing ephemeral responses).  
+- [x] Add regression tests so `/joinquest` and `/leavequest` confirmations stay ephemeral (`tests/bot/test_quest_commands_ephemeral.py`).  
+  - [x] Extend coverage to review/decision panels and logging states.
 
-**Story EP5-S3**  
-As a Player, I want quest state cues so I know if signups are closed.  
-**Acceptance Criteria**  
-Given quest status changes, When embed updates, Then footer shows Active (green circle) Active or Closed (red circle) Closed with "Approved by @DM - Updated <relative time>."  
-**DoD**  
-- Footer template standardized  
-- Triggered on Accept/Decline/Close Signups  
-- Tests cover footer output  
-**Tasks**  
-- Implement footer builder.  
-- Hook into quest state transitions.  
-- Add tests for footer formatting.
+- [x] **Story EP5-S3**  
+  As a Player, I want quest state cues so I know if signups are closed.  
+  **Acceptance Criteria**  
+  Given quest status changes, When embed updates, Then the footer shows "Active" with a green circle or "Closed" with a red circle alongside "Approved by referee name - Updated with a relative timestamp."  
+  **DoD**  
+  - Footer template standardized  
+  - Triggered on Accept/Decline/Close signups  
+  - Tests cover footer output  
+  **Tasks**  
+  - [x] Implement footer builder.  
+  - [x] Hook into quest state transitions.  
+  - [x] Add tests for footer formatting.
 
 **Story EP5-S4**  
 As a DM, I want previews in threads so the forge channel stays tidy.  
@@ -427,7 +430,7 @@ Given I click Preview, When the preview posts, Then it lives in an auto-created 
 **Milestones**: Storage schema -> Command set -> Pagination -> Auditing.  
 **NFRs**: Role-guarded, reliable responses.
 
-**Story EP6-S1**  
+- [x] **Story EP6-S1**  
 As Staff, I want to add lookup entries so common docs stay handy.  
 **Acceptance Criteria**  
 Given /lookup add name:<text> url:<url>, When executed, Then the entry is stored per guild and confirmation returns.  
@@ -436,11 +439,11 @@ Given /lookup add name:<text> url:<url>, When executed, Then the entry is stored
 - Staff-only permission check  
 - Logging for audit  
 **Tasks**  
-- Create LookupCommandsCog.  
-- Define Mongo lookup schema with compound index.  
-- Validate URL format.
-
-**Story EP6-S2**  
+- [x] Create LookupCommandsCog.  
+- [x] Define Mongo lookup schema with compound index.  
+- [x] Validate URL format.
+  
+- [x] **Story EP6-S2**  
 As Staff, I want /lookup get to surface the best match so I find docs fast.  
 **Acceptance Criteria**  
 Given a query, When requested, Then the command returns the best match (exact > prefix > contains) or a friendly miss message.  
@@ -449,11 +452,11 @@ Given a query, When requested, Then the command returns the best match (exact > 
 - Ephemeral reply  
 - Misses logged  
 **Tasks**  
-- Implement ranking logic.  
-- Format response embed.  
-- Track misses for future improvements.
-
-**Story EP6-S3**  
+- [x] Implement ranking logic.  
+- [x] Format response embed.  
+- [x] Track misses for future improvements.
+  
+- [x] **Story EP6-S3**  
 As Staff, I want /lookup list so I can browse all references.  
 **Acceptance Criteria**  
 Given multiple entries, When I list them, Then they appear in a paginated view (<=25 per page).  
@@ -462,11 +465,11 @@ Given multiple entries, When I list them, Then they appear in a paginated view (
 - Sorted alphabetically  
 - Ephemeral to staff  
 **Tasks**  
-- Build pagination UI.  
-- Query sorted results.  
-- Add integration tests.
-
-**Story EP6-S4**  
+- [x] Build pagination UI.  
+- [x] Query sorted results.  
+- [x] Add integration tests.
+  
+- [x] **Story EP6-S4**  
 As Staff, I want to remove lookup entries so stale links disappear.  
 **Acceptance Criteria**  
 Given /lookup remove name:<text>, When executed, Then the entry is deleted or a warning returns if not found.  
@@ -475,9 +478,9 @@ Given /lookup remove name:<text>, When executed, Then the entry is deleted or a 
 - Friendly warning on missing entry  
 - Logging recorded  
 **Tasks**  
-- Delete by (guild_id, name).  
-- Surface not-found message.  
-- Hook into audit logging.
+- [x] Delete by (guild_id, name).  
+- [x] Surface not-found message.  
+- [x] Hook into audit logging.
 
 ### Epic 7: External Quest IDs (P1)
 **Goal**: Ensure human-readable quest IDs remain the external identifier.  

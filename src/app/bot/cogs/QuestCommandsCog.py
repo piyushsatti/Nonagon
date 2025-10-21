@@ -677,6 +677,7 @@ class SignupDecisionView(discord.ui.View):
         await self.cog._sync_quest_announcement(
             self.guild,
             self.quest,
+            approved_by_display=self.reviewer.mention,
             last_updated_at=datetime.now(timezone.utc),
         )
 
@@ -733,6 +734,7 @@ class SignupDecisionView(discord.ui.View):
         await self.cog._sync_quest_announcement(
             self.guild,
             self.quest,
+            approved_by_display=self.reviewer.mention,
             last_updated_at=datetime.now(timezone.utc),
         )
 

@@ -43,9 +43,9 @@ def build_quest_embed(data: QuestEmbedData) -> discord.Embed:
 
     embed = discord.Embed(title=title, description=description, colour=discord.Color.blurple())
 
-    embed.add_field(name="[Quest]", value=_format_quest_section(data), inline=False)
-    embed.add_field(name="[Time]", value=_format_time_section(data.starting_at, data.duration), inline=False)
-    embed.add_field(name="[Players]", value=_format_players_section(data.roster), inline=False)
+    embed.add_field(name="🎯 Quest", value=_format_quest_section(data), inline=False)
+    embed.add_field(name="⏰ Time", value=_format_time_section(data.starting_at, data.duration), inline=False)
+    embed.add_field(name="🧑‍🤝‍🧑 Players", value=_format_players_section(data.roster), inline=False)
 
     footer_text = _format_footer(
         quest_id=data.quest_id,
@@ -132,17 +132,21 @@ def _format_footer(
     approved_by: str | None,
     last_updated: datetime | None,
 ) -> str:
-    status_text = _format_status(status)
-    parts = [f"Quest ID: {quest_id}", f"State: {status_text}"]
+    indicator = _format_state_indicator(status)
+    parts = [f"Quest ID: {quest_id}", indicator]
 
+    meta_bits: list[str] = []
     if approved_by:
-        parts.append(f"Approved by {approved_by}")
+        meta_bits.append(f"Approved by {approved_by}")
 
     if last_updated is not None:
         if last_updated.tzinfo is None:
             last_updated = last_updated.replace(tzinfo=timezone.utc)
         epoch = int(last_updated.timestamp())
-        parts.append(f"Updated <t:{epoch}:R>")
+        meta_bits.append(f"Updated <t:{epoch}:R>")
+
+    if meta_bits:
+        parts.append(" - ".join(meta_bits))
 
     return " • ".join(parts)
 
@@ -158,3 +162,23 @@ def _format_status(status: QuestStatus | str | None) -> str:
 
     normalized = label.replace("_", " ").title()
     return normalized
+
+
+def _format_state_indicator(status: QuestStatus | str | None) -> str:
+    concrete = _coerce_status(status)
+    if concrete in {QuestStatus.ANNOUNCED, QuestStatus.DRAFT}:
+        return "🟢 Active"
+    if concrete in {QuestStatus.SIGNUP_CLOSED, QuestStatus.COMPLETED, QuestStatus.CANCELLED}:
+        return "🔴 Closed"
+    return f"⚪ {_format_status(status)}"
+
+
+def _coerce_status(status: QuestStatus | str | None) -> QuestStatus | None:
+    if isinstance(status, QuestStatus):
+        return status
+    if isinstance(status, str):
+        try:
+            return QuestStatus(status.upper())
+        except ValueError:
+            return None
+    return None
