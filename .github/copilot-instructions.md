@@ -1,31 +1,30 @@
-## Orientation
-- Multi-service Python project: FastAPI API plus discord.py bot sharing domain code under `src/app`.
-- Domain layer uses dataclasses (e.g. `src/app/domain/models/QuestModel.py`, `UserModel.py`) with explicit `validate_*` helpers; call them before persist/edit flows.
-- IDs follow `EntityIDModel` prefixes (`USER`, `QUES`, `CHAR`, `SUMM`); parse via `.parse` and format with `str(id)` to stay human-readable.
-- Guild scope is mandatory: most models carry `guild_id` and Mongo filters key off it, so set/propagate guild IDs on every persistence path.
+## Architecture Snapshot
+- Multi-service Python 3.11 project: FastAPI API (`src/app/api`) and discord.py bot (`src/app/bot`) share domain models under `src/app/domain`.
+- Domain entities are dataclasses (e.g. `domain/models/QuestModel.py`, `UserModel.py`) with explicit `validate_*` methods; run them before persisting or mutating caches.
+- All persistent models require `guild_id`; repositories and bot caches rely on it, so set/propagate the guild on every write path.
+- IDs use `EntityIDModel` subclasses (`UserID`, `QuestID`, `CharacterID`, `SummaryID`); parse with `.parse(...)` and serialize via `str(id)` to preserve readable prefixes.
 
-## Runtime & Persistence
-- API entrypoint is `src/app/api/main.py`; routers live in `src/app/api/routers/`; add startup/shutdown logic via `infra/lifecycle.py`.
-- Async data access uses `infra/db.py` (Motor) and repositories like `infra/mongo/quests_repo.py`; sync bot flushes go through `infra/mongo/guild_adapter.py`.
-- Serialization helpers `infra/serialization.py` convert dataclasses ↔ BSON (handling enums, datetimes, timedeltas); reuse them for any new persistence code.
-- Sequential IDs come from `infra/db.next_id`, which stores counters in the `counters` collection per guild.
+## Persistence & Repos
+- Async Mongo access lives in `infra/db.py` + `infra/mongo/*_repo.py`; reuse `get_guild_db` and `infra/serialization.to_bson/from_bson` when adding adapters.
+- `infra/db.next_id` issues sequential IDs per guild (stored in the `counters` collection); always pass the guild id when requesting a new ID.
+- Bot-side sync writes use `infra/mongo/guild_adapter.py` when `BOT_FLUSH_VIA_ADAPTER` is true; keep both adapter and direct Motor paths aligned with schema changes.
+- Tests monkeypatch module-level singletons (e.g. `api/routers/quests.py`’s `quests_repo`) to isolate datastore behavior; follow that approach for new routers.
 
-## Discord Bot Patterns
-- Bot core (`src/app/bot/main.py`) maintains per-guild caches (`bot.guild_data`) and a `dirty_data` queue flushed by `_auto_persist_loop`; enqueue `(guild_id, user_id)` whenever you mutate cached users/quests.
-- `ListnerCog` seeds caches from Discord events; reuse `_ensure_cached_user` / `_resolve_cached_user` instead of duplicating member-fetch logic.
-- UI flows in cogs (`QuestCommandsCog`, `CharacterCommandsCog`) rely on `discord.ui.View` components and should defer responses within 3 seconds; default to ephemeral confirmations.
-- Persistence from cogs respects `BOT_FLUSH_VIA_ADAPTER` to choose between sync adapters and direct collection writes—update both branches when schemas change.
-- `QuestSignupView` reads quest IDs from embed footers (`Quest ID: …`); keep that footer format when adjusting embed builders.
-- Add new feature cogs under `src/app/bot/cogs`; `Nonagon.setup_hook` auto-loads every non-underscored module there and logs load failures.
-- Significant user actions should call `bot/utils/log_stream.send_demo_log` so demo telemetry stays accurate.
+## Discord Bot Workflow
+- `bot/main.py` bootstraps cogs, manages per-guild caches in `bot.guild_data`, and flushes dirty users via `_auto_persist_loop`; enqueue `(guild_id, user_id)` whenever cached users change.
+- `ListnerCog` helpers like `_ensure_cached_user` / `_resolve_cached_user` seed cache entries from gateway events—reuse them instead of duplicating Discord member lookups.
+- Quest flows in `bot/cogs/QuestCommandsCog.py` respect `FORGE_CHANNEL_IDS`, call APIs via `QUEST_API_BASE_URL`, and `QuestSignupView` infers IDs from embed footers formatted as `Quest ID: …`.
+- Embed rendering is centralized in `bot/utils/quest_embeds.py`; extend `QuestEmbedData` / `QuestEmbedRoster` so footers stay parseable by signup views.
 
-## Environment & Tooling
-- Key env vars: `MONGO_URI`/`MONGODB_URI`/`ATLAS_URI`, `DB_NAME`, `BOT_TOKEN`, `BOT_CLIENT_ID`, optional `PRIMARY_GUILD_ID`; keep compose and code references aligned.
-- Local run: `docker compose up --build` (containers mount `./src` and emit logs to `./logs`); ensure `.env` satisfies the compose variable chain.
-- Developer install: `python -m pip install -e .[dev]`; run suites with `python -m pytest` (asyncio auto-mode configured in `pyproject.toml`).
-- Tests are grouped by layer (`tests/domain`, `tests/infra`, `tests/bot`); async tests use `pytest.mark.asyncio` and can monkeypatch adapters like `quests_repo.COLL` for isolation.
-- Bot/APIs log to `/app/logs`; add defensive log setup for Windows paths if you introduce new handlers.
+## API Patterns
+- FastAPI entrypoint is `api/main.py`; routers under `api/routers` transform domain instances via `api/mappers.py` before returning Pydantic schemas.
+- `_persist_quest` in `api/routers/quests.py` runs `Quest.validate_quest()` prior to `quests_repo.upsert`; mirror that guardrail for new quest operations.
+- All API routes are guild-scoped (`/v1/guilds/{guild_id}/…`) and raise `HTTPException` with 4xx codes when invariants fail—match that pattern for consistency.
+- When adding repo fields, update `infra/serialization` to handle new enums/datetimes/timedeltas so Motor encoding remains lossless.
 
-## API Usage
-- Health check lives at `/healthz`; `/v1` routers currently expose demo + users flows—extend routers in `api/routers` and reuse dependency helpers in `api/deps.py` for DB access.
-- When adding endpoints, keep guild-aware filters consistent with repository interfaces and surface Discord-facing errors as JSON payloads with context.
+## Dev Workflow & Tooling
+- Docker compose (`docker-compose.yml`) builds `api` and `bot`; env resolution prefers `MONGO_URI` → `MONGODB_URI` → `ATLAS_URI`, so keep `.env` aligned with that chain.
+- Local install: `python -m pip install -e .[dev]`; run tests with `python -m pytest` (`pytest.ini` sets `asyncio_mode=auto` and session-scoped loops).
+- Start the API with `uvicorn app.api.main:app --reload`; the bot in `bot/main.py` requires valid `BOT_TOKEN` / `BOT_CLIENT_ID` and configured Discord intents.
+- Logs land under `./logs` for both services; startup code already guards against missing directories—maintain that convention on new handlers.
+- Quest interactions emit telemetry through `bot/utils/log_stream.send_demo_log`; keep those calls when refactoring to preserve demo analytics.
