@@ -129,6 +129,13 @@ All four intents must be requested in `discord.Intents` during bot startup. The 
 * Prefer **IDs** over object references in maps to avoid cycles; easy serialization.
 * Embed small, tightly‑coupled subdocs (profiles, sign‑ups). Split to collections when they grow or need independent indexing/lifecycle.
 
+### 5.3 ID Strategy
+
+* All domain IDs (`USER`, `CHAR`, `QUES`, `SUMM`) now use postal-style bodies: `PREFIX` + `L#L#L#` (e.g., `QUESH3X1T7`).
+* MongoDB documents persist IDs under `*.value`; repositories and caches compare against those values instead of `_id` or legacy `.number` fields.
+* Legacy numeric bodies remain parseable for backfilled data, but new records generate postal bodies via `EntityIDModel.generate()`.
+* Demo tooling and command surfaces surface the postal IDs to keep Discord embeds and logs aligned with repository values.
+
 ---
 
 ## 6. Security & Permissions

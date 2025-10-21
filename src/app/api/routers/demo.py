@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 from typing import Sequence
 
@@ -21,9 +22,11 @@ from app.api.schemas import (
 
 MONGO_URI = (os.getenv("MONGODB_URI") or os.getenv("MONGO_URI") or "").strip()
 if not MONGO_URI:
-    raise RuntimeError("Set MONGODB_URI (Atlas connection string) for demo endpoints")
+  logging.getLogger(__name__).warning(
+    "MONGODB_URI not set; demo endpoints will use the default localhost client."
+  )
 
-db_client = MongoClient(MONGO_URI)
+db_client = MongoClient(MONGO_URI) if MONGO_URI else MongoClient()
 
 router = APIRouter(prefix="/demo", tags=["Demo"])
 
@@ -44,6 +47,21 @@ def _guild_db_names(target: str | None = None) -> Sequence[str]:
         if name.isdigit():
             names.append(name)
     return names
+
+
+def _coerce_entity_id(payload, prefix: str) -> str | None:
+  if isinstance(payload, dict):
+    value = payload.get("value")
+    if isinstance(value, str) and value:
+      return value
+    number = payload.get("number")
+    if number is not None:
+      return f"{payload.get('prefix', prefix)}{number}"
+  elif isinstance(payload, str) and payload:
+    return payload
+  elif isinstance(payload, int):
+    return f"{prefix}{payload}"
+  return None
 
 
 async def _query_leaderboard(
@@ -90,16 +108,13 @@ async def _query_upcoming_quests(guild_id: str | None) -> UpcomingQuestsResponse
                 .limit(10)
             )
             for doc in cursor:
-                quest_id = doc.get("quest_id", {})
-                quest_prefix = quest_id.get("prefix", "QUES")
-                quest_number = quest_id.get("number")
-                quest_label = (
-                    f"{quest_prefix}{int(quest_number):04d}"
-                    if quest_number is not None
-                    else "UNKNOWN"
-                )
-                referee_doc = doc.get("referee_id", {})
-                referee_number = referee_doc.get("number")
+                quest_label = _coerce_entity_id(doc.get("quest_id"), "QUES")
+                if not quest_label:
+                    quest_label = (
+                        _coerce_entity_id(doc.get("_id"), "QUES") or "UNKNOWN"
+                    )
+
+                referee_label = _coerce_entity_id(doc.get("referee_id"), "USER")
                 quests.append(
                     UpcomingQuest(
                         guild_id=db_name,
@@ -107,11 +122,7 @@ async def _query_upcoming_quests(guild_id: str | None) -> UpcomingQuestsResponse
                         title=doc.get("title"),
                         starting_at=doc.get("starting_at"),
                         status=doc.get("status"),
-                        referee_id=(
-                            f"USER{int(referee_number):04d}"
-                            if referee_number is not None
-                            else None
-                        ),
+                        referee_id=referee_label,
                     )
                 )
 
@@ -278,8 +289,8 @@ async def demo_recent_summaries(guild_id: str | None = None) -> dict:
                     {
                         "guild_id": db_name,
                         "kind": kind if isinstance(kind, str) else str(kind),
-                        "quest_id": f"{qid.get('prefix','QUES')}{int(qid.get('number',0)):04d}" if isinstance(qid, dict) else str(qid),
-                        "character_id": f"{cid.get('prefix','CHAR')}{int(cid.get('number',0)):04d}" if isinstance(cid, dict) else str(cid),
+            "quest_id": _coerce_entity_id(qid, "QUES") or str(qid),
+            "character_id": _coerce_entity_id(cid, "CHAR") or str(cid),
                         "title": doc.get("title"),
                         "created_on": doc.get("created_on"),
                     }

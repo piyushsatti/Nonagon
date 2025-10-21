@@ -15,7 +15,7 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 
 **Conventions**:
 
-* **IDs:** Server-generated with prefixes: `USER`, `CHAR`, `QUES`, `SUMM` (e.g., `USER0001`).
+* **IDs:** Server-generated postal strings with prefixes (`USER`, `CHAR`, `QUES`, `SUMM`) followed by `L#L#L#` bodies (e.g., `USERH3X1T7`). Legacy numeric bodies remain valid for existing records but new writes emit postal values.
 * **Time:** RFC3339 UTC strings, e.g. `"2025-09-05T23:00:00Z"`.
 * **Durations:** Expressed in minutes (`duration_min`).
 * **Pagination:** Offset style, `?limit=50&offset=0`.
@@ -51,7 +51,7 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 
 ```json
 {
-  "user_id": "USER0001",
+  "user_id": "USERH3X1T7",
   "guild_id": 123,
   "discord_id": "12345",
   "roles": ["MEMBER","PLAYER"],
@@ -61,7 +61,7 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
   "reactions_given": 1,
   "reactions_received": 2,
   "voice_total_time_spent": 0.5,
-  "player": {"characters": ["CHAR0007"]},
+  "player": {"characters": ["CHARB2F4D9"]},
   "referee": null
 }
 ```
@@ -72,7 +72,7 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 
 ```json
 {
-  "owner_id": "USER0001",
+  "owner_id": "USERH3X1T7",
   "name": "Rook",
   "ddb_link": "https://ddb/...",
   "character_thread_link": "https://discord/...",
@@ -86,8 +86,8 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 
 ```json
 {
-  "character_id": "CHAR0007",
-  "owner_id": "USER0001",
+  "character_id": "CHARB2F4D9",
+  "owner_id": "USERH3X1T7",
   "name": "Rook",
   "status": "ACTIVE",
   "created_at": "2025-08-30T20:00:00Z",
@@ -105,7 +105,7 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 
 ```json
 {
-  "referee_id": "USER0002",
+  "referee_id": "USERL8M4P2",
   "title": "Into the Barrowmaze",
   "description": "Delve ...",
   "starting_at": "2025-09-05T23:00:00Z",
@@ -118,13 +118,13 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 
 ```json
 {
-  "quest_id": "QUES0012",
-  "referee_id": "USER0002",
+  "quest_id": "QUESJ5K2L9",
+  "referee_id": "USERL8M4P2",
   "title": "Into the Barrowmaze",
   "status": "ANNOUNCED",
   "signups_open": true,
   "signups": [
-    {"user_id":"USER0001","character_id":"CHAR0007","selected":false}
+    {"user_id":"USERH3X1T7","character_id":"CHARB2F4D9","selected":false}
   ],
   "linked_quests": [],
   "linked_summaries": []
@@ -138,15 +138,15 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 ```json
 {
   "kind": "PLAYER",
-  "author_id": "USER0001",
-  "character_id": "CHAR0007",
-  "quest_id": "QUES0012",
+  "author_id": "USERH3X1T7",
+  "character_id": "CHARB2F4D9",
+  "quest_id": "QUESJ5K2L9",
   "title": "Skulls and Silt",
   "description": "The party descended...",
   "raw": "markdown text ...",
   "created_on": "2025-09-06T03:10:00Z",
-  "players": ["USER0001"],
-  "characters": ["CHAR0007"]
+  "players": ["USERH3X1T7"],
+  "characters": ["CHARB2F4D9"]
 }
 ```
 
@@ -154,13 +154,13 @@ It is designed with **explicit command endpoints** for state changes, mirroring 
 
 ```json
 {
-  "summary_id": "SUMM0005",
+  "summary_id": "SUMMZ4Q6R1",
   "kind": "PLAYER",
   "title": "Skulls and Silt",
   "created_on": "2025-09-06T03:10:00Z",
   "last_edited_at": null,
-  "players": ["USER0001"],
-  "characters": ["CHAR0007"],
+  "players": ["USERH3X1T7"],
+  "characters": ["CHARB2F4D9"],
   "linked_quests": [],
   "linked_summaries": []
 }
@@ -191,7 +191,7 @@ All Users endpoints require a path parameter `guild_id` and operate only on reco
 
 * `POST /v1/characters` — Create character
 * `GET /v1/characters/{characterId}` — Fetch character
-* `GET /v1/characters?owner_id=USER0001` — List/filter characters
+* `GET /v1/characters?owner_id=USERH3X1T7` — List/filter characters
 * `PATCH /v1/characters/{characterId}` — Update character
 * `DELETE /v1/characters/{characterId}` — Delete character
 * `POST /v1/characters/{characterId}:incrementQuestsPlayed` — ++quests\_played
@@ -223,9 +223,9 @@ All Users endpoints require a path parameter `guild_id` and operate only on reco
 
 * `POST /v1/summaries` — Create summary
 * `GET /v1/summaries/{summaryId}` — Fetch summary
-* `GET /v1/summaries?author_id=USER0001` — List by author
-* `GET /v1/summaries?character_id=CHAR0007` — List by character
-* `GET /v1/summaries?player_id=USER0001` — List by player
+* `GET /v1/summaries?author_id=USERH3X1T7` — List by author
+* `GET /v1/summaries?character_id=CHARB2F4D9` — List by character
+* `GET /v1/summaries?player_id=USERH3X1T7` — List by player
 * `PATCH /v1/summaries/{summaryId}` — Update summary
 * `DELETE /v1/summaries/{summaryId}` — Delete summary
 * `POST /v1/summaries/{summaryId}:updateLastEdited` — Update last\_edited

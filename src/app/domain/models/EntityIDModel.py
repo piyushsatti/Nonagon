@@ -44,10 +44,10 @@ class EntityID:
             return
         if LEGACY_BODY_PATTERN.fullmatch(body):
             return
-            raise ValueError(
-                "Invalid ID body. Expected pattern letter-digit repeated three times "
-                "(e.g., H3X1T7)."
-            )
+        raise ValueError(
+            "Invalid ID body. Expected pattern letter-digit repeated three times "
+            "(e.g., H3X1T7) or a legacy numeric string."
+        )
 
     @property
     def body(self) -> str:

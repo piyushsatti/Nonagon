@@ -5,7 +5,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Any, List, Optional, Type
 
 import aiohttp
 import discord
@@ -20,10 +20,11 @@ from app.bot.config import (
 )
 from app.bot.utils.log_stream import send_demo_log
 from app.bot.utils.quest_embeds import QuestEmbedData, QuestEmbedRoster, build_quest_embed
-from app.domain.models.EntityIDModel import CharacterID, QuestID, UserID
+from app.domain.models.EntityIDModel import CharacterID, EntityID, QuestID, UserID
 from app.domain.models.QuestModel import PlayerSignUp, PlayerStatus, Quest, QuestStatus
 from app.domain.models.UserModel import User
 from app.infra.mongo.guild_adapter import upsert_quest_sync
+from app.infra.mongo.users_repo import UsersRepoMongo
 from app.infra.serialization import to_bson
 
 
@@ -758,19 +759,7 @@ class SignupDecisionView(discord.ui.View):
         )
 
     async def _notify_player(self, signup: PlayerSignUp, *, accepted: bool) -> None:
-        try:
-            discord_id = int(signup.user_id.number)
-        except (TypeError, ValueError):
-            discord_id = None
-
-        member = self.guild.get_member(discord_id) if discord_id is not None else None
-        if member is None:
-            try:
-                if discord_id is None:
-                    raise discord.NotFound(response=None, message="invalid id")
-                member = await self.guild.fetch_member(discord_id)
-            except Exception:
-                member = None
+        member = await self.cog._resolve_member_for_user_id(self.guild, signup.user_id)
         if member is None:
             return
 
@@ -915,6 +904,7 @@ class QuestCommandsCog(commands.Cog):
         self.bot = bot
         self._forge_previews: dict[tuple[int, int], ForgePreviewState] = {}
         self._demo_log = send_demo_log
+        self._users_repo = UsersRepoMongo()
 
     # ---------- Quest Embed Helpers ----------
 
@@ -1223,7 +1213,7 @@ class QuestCommandsCog(commands.Cog):
         quest = Quest(
             quest_id=quest_id,
             guild_id=guild.id,
-            referee_id=UserID(number=author.id),
+            referee_id=UserID.from_body(str(author.id)),
             channel_id=str(board_channel.id),
             message_id="0",
             raw=draft.raw,
@@ -1411,6 +1401,72 @@ class QuestCommandsCog(commands.Cog):
 
         user = await ensure_method(member)  # type: ignore[misc]
         return user
+
+    async def _resolve_member_for_user_id(
+        self, guild: discord.Guild, user_id: UserID
+    ) -> Optional[discord.Member]:
+        await self._ensure_guild_cache(guild)
+        guild_entry = self.bot.guild_data.get(guild.id)
+        candidate_ids: set[int] = set()
+
+        if guild_entry:
+            users = guild_entry.get("users", {})
+            for cached_discord_id, cached_user in users.items():
+                try:
+                    if cached_user.user_id == user_id:
+                        if isinstance(cached_discord_id, int):
+                            candidate_ids.add(cached_discord_id)
+                        discord_id_str = getattr(cached_user, "discord_id", None)
+                        if isinstance(discord_id_str, str) and discord_id_str.isdigit():
+                            candidate_ids.add(int(discord_id_str))
+                except AttributeError:
+                    continue
+
+        if not candidate_ids:
+            try:
+                repo_user = await self._users_repo.get(guild.id, str(user_id))
+            except Exception:
+                repo_user = None
+            if repo_user and isinstance(repo_user.discord_id, str) and repo_user.discord_id.isdigit():
+                candidate_ids.add(int(repo_user.discord_id))
+
+        body = user_id.body
+        if body.isdigit():
+            candidate_ids.add(int(body))
+
+        for discord_id in candidate_ids:
+            member = guild.get_member(discord_id)
+            if member is not None:
+                return member
+            try:
+                member = await guild.fetch_member(discord_id)
+            except Exception:
+                continue
+            if member is not None:
+                return member
+
+        return None
+
+    def _parse_entity_id(
+        self, cls: Type[EntityID], payload: Any, *, fallback: Any = None
+    ) -> EntityID:
+        if isinstance(payload, cls):
+            return payload
+        if isinstance(payload, dict):
+            value = payload.get("value")
+            if isinstance(value, str) and value:
+                return cls.parse(value)
+            number = payload.get("number")
+            if number is not None:
+                prefix = payload.get("prefix", cls.prefix)
+                return cls.parse(f"{prefix}{number}")
+        if isinstance(payload, str) and payload:
+            return cls.parse(payload)
+        if isinstance(payload, int):
+            return cls.parse(f"{cls.prefix}{payload}")
+        if fallback is not None:
+            return self._parse_entity_id(cls, fallback)
+        raise ValueError(f"Unable to parse {cls.__name__} from payload={payload!r}")
 
     def _next_quest_id(self, guild_id: int) -> QuestID:
         guild_entry = self.bot.guild_data[guild_id]
@@ -1753,14 +1809,16 @@ class QuestCommandsCog(commands.Cog):
             return False
 
     def _quest_from_doc(self, guild_id: int, doc: dict) -> Quest:
-        quest_id_doc = doc.get("quest_id", {})
-        ref_doc = doc.get("referee_id", {})
+        quest_id_doc = doc.get("quest_id")
+        ref_doc = doc.get("referee_id")
         stored_gid = doc.get("guild_id", guild_id)
 
+        ref_payload = ref_doc if ref_doc else doc.get("referee")
+
         quest = Quest(
-            quest_id=QuestID(number=int(quest_id_doc.get("number"))),
+            quest_id=self._parse_entity_id(QuestID, quest_id_doc, fallback=doc.get("_id")),
             guild_id=int(stored_gid),
-            referee_id=UserID(number=int(ref_doc.get("number"))),
+            referee_id=self._parse_entity_id(UserID, ref_payload),
             channel_id=doc["channel_id"],
             message_id=doc["message_id"],
             raw=doc.get("raw", ""),
@@ -1794,16 +1852,8 @@ class QuestCommandsCog(commands.Cog):
             status = entry.get("status")
             if uid is None or cid is None:
                 continue
-            user_id = (
-                uid
-                if isinstance(uid, UserID)
-                else UserID(number=int(uid.get("number")))
-            )
-            char_id = (
-                cid
-                if isinstance(cid, CharacterID)
-                else CharacterID(number=int(cid.get("number")))
-            )
+            user_id = self._parse_entity_id(UserID, uid)
+            char_id = self._parse_entity_id(CharacterID, cid)
             signups.append(
                 PlayerSignUp(
                     user_id=user_id,
@@ -2127,7 +2177,7 @@ class QuestCommandsCog(commands.Cog):
         if quest is None:
             raise ValueError("Quest not found.")
 
-        user_id = UserID(number=member.id)
+        user_id = UserID.from_body(str(member.id))
 
         try:
             removed_via_api = await self._remove_signup_via_api(guild, quest, user_id)
@@ -2197,22 +2247,17 @@ class QuestCommandsCog(commands.Cog):
             return
 
         for signup in quest.signups:
-            user_id = getattr(signup.user_id, "number", None)
-            if user_id is None:
+            member = await self._resolve_member_for_user_id(guild, signup.user_id)
+            if member is None:
                 continue
 
             user_record = (
-                self.bot.guild_data.get(guild.id, {}).get("users", {}).get(user_id)
+                self.bot.guild_data.get(guild.id, {})
+                .get("users", {})
+                .get(member.id)
             )
             if user_record is not None and not getattr(user_record, "dm_opt_in", True):
                 continue
-
-            member = guild.get_member(user_id)
-            if member is None:
-                try:
-                    member = await guild.fetch_member(user_id)
-                except Exception:
-                    continue
 
             try:
                 await member.send(
@@ -2222,7 +2267,7 @@ class QuestCommandsCog(commands.Cog):
             except Exception as exc:  # pragma: no cover - DM failures expected
                 logging.debug(
                     "Unable to DM summary reminder to user %s in guild %s: %s",
-                    user_id,
+                    member.id,
                     guild.id,
                     exc,
                 )
@@ -2448,11 +2493,17 @@ class QuestCommandsCog(commands.Cog):
             return
 
         try:
-            referee_discord_id = int(quest.referee_id.number)
-        except (TypeError, ValueError):
-            referee_discord_id = None
+            referee_user_id = (
+                quest.referee_id
+                if isinstance(quest.referee_id, UserID)
+                else UserID.parse(str(quest.referee_id))
+            )
+        except Exception:
+            referee_user_id = None
 
-        if referee_discord_id != member.id:
+        invoker_user_id = UserID.from_body(str(member.id))
+
+        if referee_user_id != invoker_user_id:
             await interaction.followup.send(
                 "Only the quest referee can start the quest.", ephemeral=True
             )
@@ -2527,11 +2578,17 @@ class QuestCommandsCog(commands.Cog):
             return
 
         try:
-            referee_discord_id = int(quest.referee_id.number)
-        except (TypeError, ValueError):
-            referee_discord_id = None
+            referee_user_id = (
+                quest.referee_id
+                if isinstance(quest.referee_id, UserID)
+                else UserID.parse(str(quest.referee_id))
+            )
+        except Exception:
+            referee_user_id = None
 
-        if referee_discord_id != member.id:
+        invoker_user_id = UserID.from_body(str(member.id))
+
+        if referee_user_id != invoker_user_id:
             await interaction.followup.send(
                 "Only the quest referee can end the quest.", ephemeral=True
             )

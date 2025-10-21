@@ -26,6 +26,8 @@ This page documents the bot’s slash commands, their inputs, permission require
 
 ## Quest Lifecycle
 
+> **ID format:** All quest, character, and summary identifiers use postal-style values such as `QUESH3X1T7` or `CHARB2F4D9`. Slash commands expect the full ID string (including prefix).
+
 - `createquest`
   - Inputs: `title: str`, `start_time_epoch: int>=0`, `duration_hours: int[1..48]`, `description?: str`, `image_url?: str`
   - Permissions: must run in a guild; user must be REFEREE
@@ -42,12 +44,12 @@ This page documents the bot’s slash commands, their inputs, permission require
   - Output: ephemeral confirmation; channel message notes the leave
   - Logging: demo log; debug logs on fetch failures
 - `startquest`
-  - Inputs: `quest_id: str`
+  - Inputs: `quest_id: str` (e.g., `QUESH3X1T7`)
   - Permissions: must run in a guild; only the quest referee may start
   - Output: ephemeral confirmation; signup view removed; channel notice
   - Logging: info log; demo log
 - `endquest`
-  - Inputs: `quest_id: str`
+  - Inputs: `quest_id: str` (e.g., `QUESH3X1T7`)
   - Permissions: must run in a guild; only the quest referee may end
   - Output: ephemeral confirmation; channel notice encouraging summaries
   - Logging: info log; demo log
@@ -69,7 +71,7 @@ This page documents the bot’s slash commands, their inputs, permission require
 - `character_add`
   - Inputs: `name: str`, `ddb_link: str`, `character_thread_link: str`, `token_link: str`, `art_link: str`, `description?: str`, `notes?: str`, `tags?: str`
   - Permissions: must run in a guild; member only
-  - Output: ephemeral confirmation with new character ID
+  - Output: ephemeral confirmation with new character ID (e.g., `CHARB2F4D9`)
   - Logging: info log; demo log
 - `character_list`
   - Inputs: none
