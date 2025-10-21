@@ -14,7 +14,7 @@ This document outlines the Product Requirements Document (PRD) for the Nonagon D
 
 **Status**: Draft
 
-**Last Updated**: 21 Oct 2025 (EP5-S3 state cues + EP6 `/lookup` launch)
+**Last Updated**: 21 Oct 2025 (EP7 postal-style IDs + demo alignment)
 
 **Contributors**: Piyush Satti
 
@@ -483,120 +483,137 @@ Given /lookup remove name:<text>, When executed, Then the entry is deleted or a 
 - [x] Hook into audit logging.
 
 ### Epic 7: External Quest IDs (P1)
-**Goal**: Ensure human-readable quest IDs remain the external identifier.  
-**Scope**: Audit ID usage, logging, tests.  
-**Out of Scope**: Changing ID format beyond QUES0001.  
-**Dependencies**: EntityID model, Mongo repository, bot cogs.  
-**Milestones**: Audit -> Fix stragglers -> Tests.  
-**NFRs**: No _id leakage, consistent formatting.
+**Goal**: Preserve readable quest IDs while migrating every entity to the new postal-style `PREFIX` + `L#L#L#` format across API, bot, and demo tooling.  
+**Scope**: Postal generator, repository filters, logging alignment, demo seeding, regression tests.  
+**Out of Scope**: Changing entity prefixes or dropping legacy numeric parsing (defer to post-release cleanup).  
+**Dependencies**: EntityID model, Mongo repositories, quest/character cogs, demo commands, telemetry logging.  
+**Milestones**: Generator + compatibility -> Persistence rewrite -> Logging cleanup -> Regression test suite.  
+**NFRs**: Collision detection, backward compatibility with numeric IDs, no Mongo `_id` leakage.
 
-**Story EP7-S1**  
-As a Developer, I want Quest IDs used across layers so references stay clear.  
-**Acceptance Criteria**  
-Given quest operations, When IDs pass through API/bot layers, Then QuestID strings are used instead of Mongo _id.  
-**DoD**  
-- Audit covers API, repo, bot  
-- Stragglers fixed  
-- Tests verify parse/format  
-**Tasks**  
-- Review EntityIDModel, QuestsRepoMongo, quest cog.  
-- Update any _id logging.  
-- Extend unit tests.
+- [ ] **Story EP7-S1**  
+  As a Developer, I want postal-style IDs flowing end-to-end so Discord links and API payloads stay human-readable.  
+  **Acceptance Criteria**  
+  Given quest/character/summary operations, When IDs are generated or persisted, Then they use the postal-style body (`QUESH3X1T7`, etc.) while still parsing legacy numeric values without crashes.  
+  **DoD**  
+  - EntityIDModel generates postal bodies and normalizes legacy values.  
+  - Repositories store/query against `*.value` instead of `.number`/`_id`.  
+  - Demo seeding ships postal IDs without counters.  
+  **Tasks**  
+  - [x] Replace sequential counters with `EntityID.generate()` in repos and demo seeding.  
+  - [x] Normalize owner/referee lookups to store `UserID.value`.  
+  - [ ] Sweep quest/character flows to remove `.number` accesses that assume numeric IDs.  
+  - [ ] Document migration notes for legacy guild data in docs/architecture.md.
 
-**Story EP7-S2**  
-As a Moderator, I want logs to include Quest ID so investigations are simple.  
-**Acceptance Criteria**  
-Given quest events, When logged, Then quest_id appears with guild context.  
-**DoD**  
-- Logging statements updated  
-- Demo log templates refreshed  
-- Tests confirm formatting  
-**Tasks**  
-- Update log calls in quest lifecycle.  
-- Adjust send_demo_log usage.  
-- Add logging assertions.
+- [ ] **Story EP7-S2**  
+  As a Moderator, I want logs and telemetry streams to surface the postal IDs so investigations reference a single identifier.  
+  **Acceptance Criteria**  
+  Given quest lifecycle events, When they are logged or broadcast, Then the postal `QuestID` value appears alongside the guild context in both Discord and log_stream telemetry.  
+  **DoD**  
+  - send_demo_log payloads include `quest_id.value`.  
+  - Quest/character actions avoid logging Mongo `_id`.  
+  - Audit trail in logs/test fixtures updated.  
+  **Tasks**  
+  - [ ] Update quest lifecycle logging to use `quest.quest_id.value`.  
+  - [ ] Refresh demo log templates and docs with postal-style examples.  
+  - [ ] Add regression notes in docs/discord.md.
 
-**Story EP7-S3**  
-As a Developer, I want regression coverage for ID parsing so errors surface early.  
-**Acceptance Criteria**  
-Given malformed IDs, When parsed, Then informative errors raise and tests cover them.  
-**DoD**  
-- Negative tests in place  
-- CI protects ID parsing  
-- Docs clarify ID format  
-**Tasks**  
-- Add failure-case tests.  
-- Update docs referencing quest IDs.  
-- Note migration requirements if format changes later.
+- [ ] **Story EP7-S3**  
+  As a Developer, I want regression coverage for ID parsing so malformed IDs fail fast.  
+  **Acceptance Criteria**  
+  Given invalid ID strings, When parsed, Then descriptive errors raise and tests assert the behavior across all `EntityID` subclasses.  
+  **DoD**  
+  - Unit tests cover valid/invalid postal bodies and legacy numeric parsing.  
+  - CI enforces rejection of short/unsupported prefixes.  
+  - Docs detail the accepted patterns for contributors.  
+  **Tasks**  
+  - [ ] Add pytest coverage in `tests/domain/models` for postal vs numeric bodies.  
+  - [ ] Update contributor checklist/PR template with ID-format reminder.  
+  - [ ] Call out postal-style format in `docs/API.md` and `docs/discord.md`.
 
 ### Epic 8: Demo Markdown (P3)
-**Goal**: Document the "green path" flow with visuals for developers.  
-**Scope**: docs/demo.md, screenshots/GIFs, doc links.  
-**Out of Scope**: Video hosting.  
-**Dependencies**: Completed quest flow, media assets.  
-**Milestones**: Draft narrative -> Capture media -> Link docs.  
+
+**Goal**: Document the "green path" flow with visuals for developers.
+**Scope**: docs/demo.md, screenshots/GIFs, doc links.
+**Out of Scope**: Video hosting.
+**Dependencies**: Completed quest flow, media assets.
+**Milestones**: Draft narrative -> Capture media -> Link docs.
 **NFRs**: Accessible, kept in sync.
 
-**Story EP8-S1**  
-As a Developer, I want docs/demo.md to narrate the happy path so onboarding is quick.  
-**Acceptance Criteria**  
-Given the doc, When followed, Then it covers Forge -> Approve -> Announce -> Request -> Approve -> Nudge with command samples.  
-**DoD**  
-- Step-by-step instructions  
-- Command samples verified  
-- Linked from docs index  
-**Tasks**  
-- Draft markdown with each step.  
-- Verify commands for accuracy.  
+**Story EP8-S1**
+As a Developer, I want docs/demo.md to narrate the happy path so onboarding is quick.
+**Acceptance Criteria:**
+Given the doc, When followed, Then it covers Forge -> Approve -> Announce -> Request -> Approve -> Nudge with command samples.
+**DoD:**
+
+- Step-by-step instructions
+- Command samples verified
+- Linked from docs index
+
+**Tasks:**
+
+- Draft markdown with each step.
+- Verify commands for accuracy.
 - Update docs/index.md navigation.
 
-**Story EP8-S2**  
-As a Developer, I want screenshots/GIFs so I can visualize interactions.  
-**Acceptance Criteria**  
-Given each step, When viewing docs, Then an image or GIF with caption is present.  
-**DoD**  
-- Assets stored under docs/media/  
-- Alt text provided  
-- File sizes optimized  
-**Tasks**  
-- Capture media assets.  
-- Add references in markdown.  
+**Story EP8-S2**
+As a Developer, I want screenshots/GIFs so I can visualize interactions.
+**Acceptance Criteria:**
+Given each step, When viewing docs, Then an image or GIF with caption is present.
+**DoD:**
+
+- Assets stored under docs/media/
+- Alt text provided
+- File sizes optimized
+
+**Tasks:**
+
+- Capture media assets.
+- Add references in markdown.
 - Compress assets for repo.
 
-**Story EP8-S3**  
-As a Developer, I want documentation upkeep baked into process so it stays current.  
-**Acceptance Criteria**  
-Given future PRs, When changes ship, Then docs updates are part of DoD.  
-**DoD**  
-- Contribution guide/PR template updated  
-- Reminder in team rituals  
-- Tracking note added  
-**Tasks**  
-- Update contribution docs.  
-- Add checklist item to PR template.  
+**Story EP8-S3**
+As a Developer, I want documentation upkeep baked into process so it stays current.
+**Acceptance Criteria:**
+Given future PRs, When changes ship, Then docs updates are part of DoD.
+**DoD:**
+
+- Contribution guide/PR template updated
+- Reminder in team rituals
+- Tracking note added
+
+**Tasks:**
+
+- Update contribution docs.
+- Add checklist item to PR template.
 - Monitor doc freshness periodically.
 
 Note: Data & interface adjustments include last_nudged_at on quests, optional quick-create character schema tweaks, and a new lookup collection; coordinate migrations with release planning.
 
 Note: Test plan spans domain (Quest/Character IDs, cooldowns), API (signups, nudge), and Discord interaction mocks; ensure regression coverage accompanies each epic.
+
 ## 8. Resources & Dependencies
-* **Framework**: discord.py
-* **Database**: MongoDB Atlas
-* **Infra**: Docker, hosted on DigitalOcean
+
+- **Framework**: discord.py
+- **Database**: MongoDB Atlas
+- **Infra**: Docker, hosted on DigitalOcean
 
 ## 9. Timeline & Milestones
-* **Milestone 1**: Bot Skeleton + DB setup
-* **Milestone 2**: Quest Announcement + Sign-up Automation
-* **Milestone 3**: Summary Linking + Data Tracking MVP
+
+- **Milestone 1**: Bot Skeleton + DB setup
+- **Milestone 2**: Quest Announcement + Sign-up Automation
+- **Milestone 3**: Summary Linking + Data Tracking MVP
 
 ## 10. Risks & Assumptions
-**Risks**
-* Discord API limitations.
-* Manual overrides by Admins may cause data inconsistency.
 
-**Assumptions**
-* Single dev team.
-* Users already familiar with Discord workflows.
+### Risks
+
+- Discord API limitations.
+- Manual overrides by Admins may cause data inconsistency.
+
+### Assumptions
+
+- Single dev team.
+- Users already familiar with Discord workflows.
 
 ---
 

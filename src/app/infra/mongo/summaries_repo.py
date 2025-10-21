@@ -5,7 +5,7 @@ from typing import Optional
 from app.domain.models.EntityIDModel import SummaryID
 from app.domain.models.SummaryModel import QuestSummary
 from app.domain.usecase.ports import SummariesRepo
-from app.infra.db import get_guild_db, next_id
+from app.infra.db import get_guild_db
 from app.infra.mongo.mappers import dataclass_to_mongo, mongo_to_dataclass
 
 
@@ -38,7 +38,13 @@ class SummariesRepoMongo(SummariesRepo):
         return res.deleted_count == 1
 
     async def next_id(self, guild_id: int) -> str:
-        return str(await next_id(SummaryID, guild_id))
+        while True:
+            candidate = SummaryID.generate()
+            exists = await _coll(guild_id).count_documents(
+                {"guild_id": int(guild_id), "_id": str(candidate)}, limit=1
+            )
+            if not exists:
+                return str(candidate)
 
     async def exists(self, guild_id: int, summary_id: str) -> bool:
         return (

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
@@ -12,8 +12,6 @@ import discord
 from discord import app_commands
 from discord.abc import Messageable
 from discord.ext import commands
-from pymongo import ReturnDocument
-
 from app.bot.config import (
     BOT_FLUSH_VIA_ADAPTER,
     FORGE_CHANNEL_IDS,
@@ -26,6 +24,7 @@ from app.domain.models.EntityIDModel import CharacterID, QuestID, UserID
 from app.domain.models.QuestModel import PlayerSignUp, PlayerStatus, Quest, QuestStatus
 from app.domain.models.UserModel import User
 from app.infra.mongo.guild_adapter import upsert_quest_sync
+from app.infra.serialization import to_bson
 
 
 class ForgeDraftView(discord.ui.View):
@@ -441,21 +440,24 @@ class CharacterSelect(discord.ui.Select):
         options: list[discord.SelectOption] = []
         if guild_entry is not None:
             db = guild_entry["db"]
+            owner_id = str(UserID.from_body(str(member.id)))
             cursor = (
                 db["characters"]
                 .find(
-                    {"owner_id.number": int(member.id)},
+                    {"owner_id.value": owner_id},
                     {"_id": 0, "character_id": 1, "name": 1},
                 )
                 .limit(25)
             )
             for doc in cursor:
                 cid = doc.get("character_id", {})
-                label = (
-                    f"{cid.get('prefix','CHAR')}{int(cid.get('number',0)):04d}"
-                    if isinstance(cid, dict)
-                    else str(cid)
-                )
+                if isinstance(cid, dict):
+                    if "value" in cid:
+                        label = cid["value"]
+                    else:
+                        label = f"{cid.get('prefix', 'CHAR')}{cid.get('number', '')}"
+                else:
+                    label = str(cid)
                 name = doc.get("name") or label
                 options.append(
                     discord.SelectOption(label=f"{label} — {name}", value=label)
@@ -756,10 +758,17 @@ class SignupDecisionView(discord.ui.View):
         )
 
     async def _notify_player(self, signup: PlayerSignUp, *, accepted: bool) -> None:
-        member = self.guild.get_member(signup.user_id.number)
+        try:
+            discord_id = int(signup.user_id.number)
+        except (TypeError, ValueError):
+            discord_id = None
+
+        member = self.guild.get_member(discord_id) if discord_id is not None else None
         if member is None:
             try:
-                member = await self.guild.fetch_member(signup.user_id.number)
+                if discord_id is None:
+                    raise discord.NotFound(response=None, message="invalid id")
+                member = await self.guild.fetch_member(discord_id)
             except Exception:
                 member = None
         if member is None:
@@ -1406,48 +1415,18 @@ class QuestCommandsCog(commands.Cog):
     def _next_quest_id(self, guild_id: int) -> QuestID:
         guild_entry = self.bot.guild_data[guild_id]
         db = guild_entry["db"]
-        doc = db["counters"].find_one_and_update(
-            {"_id": QuestID.prefix},
-            {"$inc": {"seq": 1}},
-            upsert=True,
-            return_document=ReturnDocument.AFTER,
-        )
-        return QuestID(number=int(doc["seq"]))
+        coll = db["quests"]
+        while True:
+            candidate = QuestID.generate()
+            exists = coll.count_documents(
+                {"guild_id": guild_id, "quest_id.value": str(candidate)}, limit=1
+            )
+            if not exists:
+                return candidate
 
     def _quest_to_doc(self, quest: Quest) -> dict:
-        doc = asdict(quest)
+        doc = to_bson(quest)
         doc["guild_id"] = quest.guild_id
-        doc.setdefault("quest_id", {})
-        doc["quest_id"]["prefix"] = quest.quest_id.prefix
-        doc.setdefault("referee_id", {})
-        doc["referee_id"]["prefix"] = quest.referee_id.prefix
-        if isinstance(quest.status, QuestStatus):
-            doc["status"] = quest.status.value
-
-        normalized_signups = []
-        for signup in doc.get("signups", []):
-            user_doc = signup.get("user_id", {})
-            char_doc = signup.get("character_id", {})
-            normalized_signups.append(
-                {
-                    "user_id": {
-                        "prefix": UserID.prefix,
-                        "number": user_doc.get("number"),
-                    },
-                    "character_id": {
-                        "prefix": CharacterID.prefix,
-                        "number": char_doc.get("number"),
-                    },
-                    "status": (
-                        signup.get("status").value
-                        if isinstance(signup.get("status"), PlayerStatus)
-                        else signup.get("status")
-                    ),
-                }
-            )
-        doc["signups"] = normalized_signups
-        if quest.duration is not None:
-            doc["duration"] = quest.duration.total_seconds()
         return doc
 
     def _persist_quest(self, guild_id: int, quest: Quest) -> None:
@@ -1461,7 +1440,7 @@ class QuestCommandsCog(commands.Cog):
         quest.guild_id = guild_id
         payload = self._quest_to_doc(quest)
         db["quests"].update_one(
-            {"guild_id": guild_id, "quest_id.number": quest.quest_id.number},
+            {"guild_id": guild_id, "quest_id.value": str(quest.quest_id)},
             {"$set": payload},
             upsert=True,
         )
@@ -1846,15 +1825,13 @@ class QuestCommandsCog(commands.Cog):
         doc = db["quests"].find_one(
             {
                 "guild_id": guild_id,
-                "quest_id.number": quest_id.number,
-                "quest_id.prefix": quest_id.prefix,
+                "quest_id.value": str(quest_id),
             }
         )
         if doc is None:
             doc = db["quests"].find_one(
                 {
-                    "quest_id.number": quest_id.number,
-                    "quest_id.prefix": quest_id.prefix,
+                    "quest_id.value": str(quest_id),
                 }
             )
             if doc is None:
@@ -1886,7 +1863,10 @@ class QuestCommandsCog(commands.Cog):
         term = (current or "").upper()
         for doc in cursor:
             qid = doc.get("quest_id", {})
-            label = f"{qid.get('prefix','QUES')}{int(qid.get('number',0)):04d}"
+            if isinstance(qid, dict):
+                label = qid.get("value") or f"{qid.get('prefix', 'QUES')}{qid.get('number', '')}"
+            else:
+                label = str(qid)
             if term and term not in label:
                 continue
             title = doc.get("title") or label
@@ -1907,7 +1887,7 @@ class QuestCommandsCog(commands.Cog):
             .find(
                 {
                     "guild_id": interaction.guild.id,
-                    "owner_id.number": int(interaction.user.id),
+                    "owner_id.value": str(UserID.from_body(str(interaction.user.id))),
                 },
                 {"_id": 0, "character_id": 1, "name": 1},
             )
@@ -1917,11 +1897,10 @@ class QuestCommandsCog(commands.Cog):
         choices: list[app_commands.Choice[str]] = []
         for doc in cursor:
             cid = doc.get("character_id", {})
-            label = (
-                f"{cid.get('prefix','CHAR')}{int(cid.get('number',0)):04d}"
-                if isinstance(cid, dict)
-                else str(cid)
-            )
+            if isinstance(cid, dict):
+                label = cid.get("value") or f"{cid.get('prefix', 'CHAR')}{cid.get('number', '')}"
+            else:
+                label = str(cid)
             if term and term not in label:
                 continue
             name = doc.get("name") or label
@@ -2468,7 +2447,12 @@ class QuestCommandsCog(commands.Cog):
             await interaction.followup.send("Quest not found.", ephemeral=True)
             return
 
-        if quest.referee_id.number != member.id:
+        try:
+            referee_discord_id = int(quest.referee_id.number)
+        except (TypeError, ValueError):
+            referee_discord_id = None
+
+        if referee_discord_id != member.id:
             await interaction.followup.send(
                 "Only the quest referee can start the quest.", ephemeral=True
             )
@@ -2542,7 +2526,12 @@ class QuestCommandsCog(commands.Cog):
             await interaction.followup.send("Quest not found.", ephemeral=True)
             return
 
-        if quest.referee_id.number != member.id:
+        try:
+            referee_discord_id = int(quest.referee_id.number)
+        except (TypeError, ValueError):
+            referee_discord_id = None
+
+        if referee_discord_id != member.id:
             await interaction.followup.send(
                 "Only the quest referee can end the quest.", ephemeral=True
             )

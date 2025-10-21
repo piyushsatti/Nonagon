@@ -1,16 +1,12 @@
 # app/infra/db.py
 from __future__ import annotations
 
-from typing import Optional, Type, TypeVar
+from typing import Optional
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
-from pymongo import ReturnDocument
-
-from app.domain.models.EntityIDModel import EntityID
 from app.infra.settings import DB_NAME, MONGODB_URI
 
 _client: Optional[AsyncIOMotorClient] = None
-T = TypeVar("T", bound=EntityID)
 
 
 def get_client() -> AsyncIOMotorClient:
@@ -45,21 +41,6 @@ async def ping() -> bool:
     except Exception as e:
         print(f"[Mongo Ping Failed] {e}")
         return False
-
-
-async def next_id(id_cls: Type[T], guild_id: int | str | None = None) -> T:
-    """
-    Generate the next sequential ID for a given EntityID subclass.
-    Stores counters in a 'counters' collection keyed by prefix.
-    """
-    db = get_guild_db(guild_id) if guild_id is not None else get_db()
-    doc = await db["counters"].find_one_and_update(
-        {"_id": id_cls.prefix},
-        {"$inc": {"seq": 1}},
-        upsert=True,
-        return_document=ReturnDocument.AFTER,
-    )
-    return id_cls(number=int(doc["seq"]))
 
 
 async def close_client() -> None:

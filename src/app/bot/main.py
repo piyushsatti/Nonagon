@@ -196,7 +196,10 @@ class Nonagon(commands.Bot):
                         payload["guild_id"] = payload.get("guild_id") or gid
                         await asyncio.to_thread(
                             db.users.update_one,
-                            {"guild_id": payload["guild_id"], "user_id.number": user.user_id.number},
+                            {
+                                "guild_id": payload["guild_id"],
+                                "user_id.value": str(user.user_id),
+                            },
                             {"$set": payload},
                             upsert=True,
                         )
@@ -256,15 +259,24 @@ class Nonagon(commands.Bot):
                 found_with_guild = True
                 user = User.from_dict(doc)
                 user.guild_id = guild.id
-                raw_key = doc.get("discord_id")
-                try:
-                    key = (
-                        int(raw_key)
-                        if raw_key is not None
-                        else int(user.user_id.number)
+                raw_key = doc.get("discord_id") or user.discord_id
+                if raw_key is None:
+                    logging.debug(
+                        "Skipping cached user with missing discord_id (guild=%s, user_id=%s)",
+                        guild.id,
+                        user.user_id,
                     )
+                    continue
+                try:
+                    key = int(raw_key)
                 except (TypeError, ValueError):
-                    key = int(user.user_id.number)
+                    logging.debug(
+                        "Skipping cached user with non-numeric discord_id=%s (guild=%s, user_id=%s)",
+                        raw_key,
+                        guild.id,
+                        user.user_id,
+                    )
+                    continue
                 users[key] = user
 
             if not found_with_guild:
@@ -272,15 +284,24 @@ class Nonagon(commands.Bot):
                 for doc in legacy_cursor:
                     user = User.from_dict(doc)
                     user.guild_id = guild.id
-                    raw_key = doc.get("discord_id")
-                    try:
-                        key = (
-                            int(raw_key)
-                            if raw_key is not None
-                            else int(user.user_id.number)
+                    raw_key = doc.get("discord_id") or user.discord_id
+                    if raw_key is None:
+                        logging.debug(
+                            "Skipping legacy user with missing discord_id (guild=%s, user_id=%s)",
+                            guild.id,
+                            user.user_id,
                         )
+                        continue
+                    try:
+                        key = int(raw_key)
                     except (TypeError, ValueError):
-                        key = int(user.user_id.number)
+                        logging.debug(
+                            "Skipping legacy user with non-numeric discord_id=%s (guild=%s, user_id=%s)",
+                            raw_key,
+                            guild.id,
+                            user.user_id,
+                        )
+                        continue
                     users[key] = user
 
             if users:

@@ -1,21 +1,20 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Optional
 
 import discord
 from discord import app_commands
 from discord.ext import commands
-from pymongo import ReturnDocument
 
 from app.bot.utils.log_stream import send_demo_log
 from app.domain.models.CharacterModel import Character
-from app.domain.models.EntityIDModel import CharacterID
+from app.domain.models.EntityIDModel import CharacterID, UserID
 from app.domain.models.UserModel import User
 from app.infra.mongo.guild_adapter import upsert_character_sync
 from app.bot.config import BOT_FLUSH_VIA_ADAPTER
+from app.infra.serialization import to_bson
 
 
 class CharacterCommandsCog(commands.Cog):
@@ -50,13 +49,14 @@ class CharacterCommandsCog(commands.Cog):
     def _next_character_id(self, guild_id: int) -> CharacterID:
         guild_entry = self.bot.guild_data[guild_id]
         db = guild_entry["db"]
-        doc = db["counters"].find_one_and_update(
-            {"_id": CharacterID.prefix},
-            {"$inc": {"seq": 1}},
-            upsert=True,
-            return_document=ReturnDocument.AFTER,
-        )
-        return CharacterID(number=int(doc["seq"]))
+        coll = db["characters"]
+        while True:
+            candidate = CharacterID.generate()
+            exists = coll.count_documents(
+                {"guild_id": guild_id, "character_id": str(candidate)}, limit=1
+            )
+            if not exists:
+                return candidate
 
     def _persist_character(self, guild_id: int, character: Character) -> None:
         if BOT_FLUSH_VIA_ADAPTER:
@@ -66,26 +66,14 @@ class CharacterCommandsCog(commands.Cog):
         guild_entry = self.bot.guild_data[guild_id]
         db = guild_entry["db"]
         character.guild_id = guild_id
-        # Normalize character_id to dict shape for consistency
-        from app.domain.models.EntityIDModel import CharacterID as _CID
-        try:
-            cid = _CID.parse(character.character_id)
-            doc = asdict(character)
-            doc["character_id"] = {"prefix": cid.prefix, "number": cid.number}
-            doc["guild_id"] = guild_id
-            db["characters"].update_one(
-                {"guild_id": guild_id, "character_id.number": cid.number},
-                {"$set": doc},
-                upsert=True,
-            )
-        except Exception:
-            doc = asdict(character)
-            doc["guild_id"] = guild_id
-            db["characters"].update_one(
-                {"guild_id": guild_id, "character_id": character.character_id},
-                {"$set": doc},
-                upsert=True,
-            )
+        doc = to_bson(character)
+        doc["guild_id"] = guild_id
+        doc["character_id"] = str(character.character_id)
+        db["characters"].update_one(
+            {"guild_id": guild_id, "character_id": str(character.character_id)},
+            {"$set": doc},
+            upsert=True,
+        )
 
     @app_commands.command(name="character_add", description="Create a new character profile.")
     @app_commands.describe(
@@ -219,8 +207,12 @@ class CharacterCommandsCog(commands.Cog):
         guild_entry = self.bot.guild_data[interaction.guild.id]
         db = guild_entry["db"]
 
+        owner_id = str(UserID.from_body(str(member.id)))
         cursor = db["characters"].find(
-            {"guild_id": interaction.guild.id, "owner_id.number": member.id},
+            {
+                "guild_id": interaction.guild.id,
+                "owner_id.value": owner_id,
+            },
             {"_id": 0, "character_id": 1, "name": 1, "ddb_link": 1},
         )
         characters = list(cursor)
@@ -238,11 +230,10 @@ class CharacterCommandsCog(commands.Cog):
         )
         for doc in characters:
             char_id = doc["character_id"]
-            label = (
-                char_id["prefix"] + f"{char_id['number']:04d}"
-                if isinstance(char_id, dict)
-                else str(char_id)
-            )
+            if isinstance(char_id, dict):
+                label = char_id.get("value") or f"{char_id.get('prefix', 'CHAR')}{char_id.get('number', '')}"
+            else:
+                label = str(char_id)
             embed.add_field(
                 name=f"{label} — {doc.get('name', 'Unnamed')}",
                 value=doc.get("ddb_link", "No sheet link"),

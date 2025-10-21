@@ -9,6 +9,7 @@ from discord.ext import commands
 from app.bot import database
 from app.bot.config import DEMO_RESET_ENABLED
 from app.bot.utils.log_stream import send_demo_log
+from app.domain.models.EntityIDModel import CharacterID, QuestID, UserID
 
 
 class DemoCommandsCog(commands.Cog):
@@ -24,28 +25,23 @@ class DemoCommandsCog(commands.Cog):
         self.bot.guild_data.pop(guild.id, None)
         await self.bot.load_or_create_guild_cache(guild)
 
-    def _next_seq(self, guild: discord.Guild, prefix: str) -> int:
-        db = self.bot.guild_data[guild.id]["db"]
-        doc = db["counters"].find_one_and_update(
-            {"_id": prefix}, {"$inc": {"seq": 1}}, upsert=True, return_document=True
-        )
-        return int(doc["seq"]) if doc and "seq" in doc else 1
-
     def _seed_demo(self, guild: discord.Guild) -> None:
         db = self.bot.guild_data[guild.id]["db"]
 
         # Seed character for guild owner (or first non-bot member)
         owner = guild.owner or next((m for m in guild.members if not m.bot), None)
         if owner:
-            char_seq = self._next_seq(guild, "CHAR")
+            char_id = CharacterID.generate()
+            owner_user_id = str(UserID.from_body(str(owner.id)))
             db["characters"].update_one(
-                {"guild_id": guild.id, "character_id.number": char_seq},
+                {"guild_id": guild.id, "character_id": str(char_id)},
                 {
                     "$set": {
                         "guild_id": guild.id,
-                        "character_id": {"prefix": "CHAR", "number": char_seq},
-                        "owner_id": {"prefix": "USER", "number": owner.id},
-                        "name": f"Demo Hero #{char_seq:04d}",
+                        "_id": str(char_id),
+                        "character_id": str(char_id),
+                        "owner_id": {"value": owner_user_id},
+                        "name": f"Demo Hero {char_id.body}",
                         "ddb_link": "https://example.com/character",
                         "character_thread_link": "https://example.com/thread",
                         "token_link": "https://example.com/token.png",
@@ -58,15 +54,18 @@ class DemoCommandsCog(commands.Cog):
         # Seed a quest 24h from now
         import datetime as _dt
 
-        q_seq = self._next_seq(guild, "QUES")
+        quest_id = QuestID.generate()
         starts = _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(hours=24)
+        referee_value = (
+            {"value": str(UserID.from_body(str(owner.id)))} if owner else None
+        )
         db["quests"].update_one(
-            {"guild_id": guild.id, "quest_id.number": q_seq},
+            {"guild_id": guild.id, "quest_id.value": quest_id.value},
             {
                 "$set": {
                     "guild_id": guild.id,
-                    "quest_id": {"prefix": "QUES", "number": q_seq},
-                    "referee_id": {"prefix": "USER", "number": (owner.id if owner else 0)},
+                    "quest_id": {"value": quest_id.value},
+                    "referee_id": referee_value,
                     "channel_id": str(getattr(guild.system_channel, "id", 0)),
                     "message_id": "0",
                     "raw": "# Demo Quest\nA simple seed quest.",

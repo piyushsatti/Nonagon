@@ -6,7 +6,7 @@ from typing import Optional
 from app.domain.models.CharacterModel import Character
 from app.domain.models.EntityIDModel import CharacterID
 from app.domain.usecase.ports import CharactersRepo
-from app.infra.db import get_guild_db, next_id
+from app.infra.db import get_guild_db
 from app.infra.mongo.mappers import dataclass_to_mongo, mongo_to_dataclass
 
 def COLL(guild_id: int | str):
@@ -38,7 +38,13 @@ class CharactersRepoMongo(CharactersRepo):
         return res.deleted_count == 1
 
     async def next_id(self, guild_id: int) -> str:
-        return str(await next_id(CharacterID, guild_id))
+        while True:
+            candidate = CharacterID.generate()
+            exists = await COLL(guild_id).count_documents(
+                {"guild_id": int(guild_id), "_id": str(candidate)}, limit=1
+            )
+            if not exists:
+                return str(candidate)
 
     async def exists(self, guild_id: int, character_id: str) -> bool:
         return (

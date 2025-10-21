@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
-
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from app.domain.models.EntityIDModel import CharacterID, QuestID, SummaryID, UserID
+from app.domain.models.EntityIDModel import CharacterID, QuestID, SummaryID
 from app.domain.models.SummaryModel import QuestSummary, SummaryKind
 
 
@@ -54,11 +52,21 @@ class SummaryCommandsCog(commands.Cog):
             )
             return
 
+        guild_entry = self.bot.guild_data.get(interaction.guild.id, {})
+        cached_user = guild_entry.get("users", {}).get(author.id) if guild_entry else None
+
+        if cached_user is None:
+            await interaction.followup.send(
+                "You need to appear in the guild roster before filing summaries.",
+                ephemeral=True,
+            )
+            return
+
         try:
             s = QuestSummary(
-                summary_id=SummaryID(number=1),  # placeholder; not persisted yet
+                summary_id=SummaryID.generate(),
                 kind=SummaryKind(kind.value),
-                author_id=UserID(number=author.id),
+                author_id=cached_user.user_id,
                 character_id=CharacterID.parse(character_id.upper()),
                 quest_id=QuestID.parse(quest_id.upper()),
                 guild_id=interaction.guild.id,
@@ -66,7 +74,7 @@ class SummaryCommandsCog(commands.Cog):
                 title=title,
                 description=description,
                 created_on=datetime.now(timezone.utc),
-                players=[UserID(number=author.id)],
+                players=[cached_user.user_id],
                 characters=[CharacterID.parse(character_id.upper())],
             )
             s.validate_summary()

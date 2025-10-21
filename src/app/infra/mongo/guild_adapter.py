@@ -17,18 +17,18 @@ _QUEST_INDEX_CACHE: set[str] = set()
 _CHAR_INDEX_CACHE: set[str] = set()
 
 _USER_INDEXES: Tuple[Tuple[Iterable[Tuple[str, int]], dict], ...] = (
-    ((("guild_id", ASCENDING), ("user_id.number", ASCENDING)), {"unique": True, "name": "guild_user_number"}),
+    ((("guild_id", ASCENDING), ("user_id.value", ASCENDING)), {"unique": True, "name": "guild_user_value"}),
     ((("guild_id", ASCENDING), ("discord_id", ASCENDING)), {"unique": True, "sparse": True, "name": "guild_discord_id"}),
 )
 
 _QUEST_INDEXES: Tuple[Tuple[Iterable[Tuple[str, int]], dict], ...] = (
-    ((("guild_id", ASCENDING), ("quest_id.number", ASCENDING)), {"unique": True, "name": "guild_quest_number"}),
+    ((("guild_id", ASCENDING), ("quest_id.value", ASCENDING)), {"unique": True, "name": "guild_quest_value"}),
     ((("guild_id", ASCENDING), ("channel_id", ASCENDING), ("message_id", ASCENDING)), {"unique": True, "name": "guild_channel_message"}),
 )
 
 _CHAR_INDEXES: Tuple[Tuple[Iterable[Tuple[str, int]], dict], ...] = (
-    ((("guild_id", ASCENDING), ("character_id.number", ASCENDING)), {"unique": True, "name": "guild_character_number"}),
-    ((("guild_id", ASCENDING), ("owner_id.number", ASCENDING)), {"name": "guild_character_owner"}),
+    ((("guild_id", ASCENDING), ("character_id", ASCENDING)), {"unique": True, "name": "guild_character_id"}),
+    ((("guild_id", ASCENDING), ("owner_id.value", ASCENDING)), {"name": "guild_character_owner"}),
 )
 
 
@@ -66,7 +66,7 @@ def upsert_user_sync(db_client, guild_id: int, user: User) -> None:
     doc = to_bson(user)
     doc["guild_id"] = _coerce_guild_id(doc.get("guild_id"), guild_id)
     coll.update_one(
-        {"guild_id": doc["guild_id"], "user_id.number": user.user_id.number},
+        {"guild_id": doc["guild_id"], "user_id.value": str(user.user_id)},
         {"$set": doc},
         upsert=True,
     )
@@ -96,16 +96,13 @@ def _quest_to_doc(quest: Quest) -> dict:
         doc["duration"] = quest.duration.total_seconds()
     # Ensure ID dict shapes
     if isinstance(doc.get("quest_id"), dict):
-        pass
+        doc["quest_id"] = {"value": str(quest.quest_id)}
     else:
-        doc["quest_id"] = {
-            "prefix": quest.quest_id.prefix,
-            "number": quest.quest_id.number,
-        }
+        doc["quest_id"] = {"value": str(quest.quest_id)}
     if isinstance(doc.get("referee_id"), dict):
-        pass
+        doc["referee_id"] = {"value": str(quest.referee_id)}
     else:
-        doc["referee_id"] = {"prefix": "USER", "number": quest.referee_id.number}
+        doc["referee_id"] = {"value": str(quest.referee_id)}
     return doc
 
 
@@ -114,7 +111,7 @@ def upsert_quest_sync(db_client, guild_id: int, quest: Quest) -> None:
     doc = _quest_to_doc(quest)
     doc["guild_id"] = _coerce_guild_id(doc.get("guild_id"), guild_id)
     coll.update_one(
-        {"guild_id": doc["guild_id"], "quest_id.number": quest.quest_id.number},
+        {"guild_id": doc["guild_id"], "quest_id.value": str(quest.quest_id)},
         {"$set": doc},
         upsert=True,
     )
@@ -127,8 +124,9 @@ def upsert_character_sync(db_client, guild_id: int, character: Character) -> Non
     # Ensure character_id stored as dict with prefix/number
     try:
         cid = CharacterID.parse(character.character_id)
-        doc["character_id"] = {"prefix": cid.prefix, "number": cid.number}
-        filt = {"guild_id": doc["guild_id"], "character_id.number": cid.number}
+        doc["character_id"] = str(cid)
+        doc["owner_id"] = {"value": str(character.owner_id)}
+        filt = {"guild_id": doc["guild_id"], "character_id": str(cid)}
     except Exception:
         # Fallback to string key
         filt = {"guild_id": doc["guild_id"], "character_id": character.character_id}

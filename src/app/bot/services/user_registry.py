@@ -51,7 +51,7 @@ class UserRegistry:
         joined_at = member.joined_at or self._clock()
 
         user = User(
-            user_id=UserID(number=member.id),
+            user_id=UserID.from_body(str(member.id)),
             guild_id=resolved_guild_id,
             discord_id=discord_id,
             dm_channel_id=None,

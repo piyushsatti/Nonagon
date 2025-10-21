@@ -242,9 +242,17 @@ class User:
 
         user_id = payload.get("user_id")
         if isinstance(user_id, dict):
-            payload["user_id"] = UserID(**user_id)
+            if "value" in user_id:
+                payload["user_id"] = UserID(value=user_id["value"])
+            elif "number" in user_id:
+                prefix = user_id.get("prefix", UserID.prefix)
+                payload["user_id"] = UserID.parse(f"{prefix}{user_id['number']}")
+            else:
+                raise ValueError("Unsupported user_id payload")
+        elif isinstance(user_id, str):
+            payload["user_id"] = UserID.parse(user_id)
         elif isinstance(user_id, int):
-            payload["user_id"] = UserID(number=user_id)
+            payload["user_id"] = UserID.parse(f"{UserID.prefix}{user_id}")
 
         roles = payload.get("roles")
         if roles is not None:
@@ -271,7 +279,7 @@ class User:
         last_active = joined_at or datetime.now(timezone.utc)
 
         user = cls(
-            user_id=UserID(number=member.id),
+            user_id=UserID.from_body(str(member.id)),
             guild_id=getattr(member.guild, "id", None),
             discord_id=str(member.id),
             joined_at=joined_at,
