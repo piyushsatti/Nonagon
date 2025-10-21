@@ -363,9 +363,10 @@ class QuestSignupView(discord.ui.View):
             return
 
         pending = [s for s in quest.signups if s.status is not PlayerStatus.SELECTED]
-        if not pending:
+        if not pending and not quest.is_signup_open:
             await interaction.response.send_message(
-                "No pending requests at the moment.", ephemeral=True
+                "No pending requests and signups are already closed.",
+                ephemeral=True,
             )
             return
 
@@ -490,6 +491,8 @@ class SignupDecisionView(discord.ui.View):
         self.decline_button = SignupDeclineButton()
         self.add_item(self.accept_button)
         self.add_item(self.decline_button)
+        self.close_button = SignupCloseButton()
+        self.add_item(self.close_button)
 
         self._refresh_from_quest()
 
@@ -498,7 +501,14 @@ class SignupDecisionView(discord.ui.View):
         lines = [f"Pending requests for `{quest_name}`:"]
         if not self.pending_signups:
             lines.append("All requests have been reviewed.")
+            if self.quest.is_signup_open:
+                lines.append("You can close signups once the roster looks right.")
+            if not self.quest.is_signup_open:
+                lines.append("Signups are currently closed for this quest.")
             return "\n".join(lines)
+
+        if not self.quest.is_signup_open:
+            lines.append("Signups are currently closed for this quest.")
 
         for signup in self.pending_signups:
             marker = "->" if str(signup.user_id) == self.selected_user_id else "- "
@@ -547,6 +557,11 @@ class SignupDecisionView(discord.ui.View):
             self.select.placeholder = "Select a request to review"
             self.accept_button.disabled = False
             self.decline_button.disabled = False
+
+        self.close_button.disabled = not self.quest.is_signup_open
+        if not self.quest.is_signup_open:
+            self.accept_button.disabled = True
+            self.decline_button.disabled = True
 
     async def handle_accept(self, interaction: discord.Interaction) -> None:
         signup = self.pending_map.get(self.selected_user_id or "")
@@ -657,6 +672,61 @@ class SignupDecisionView(discord.ui.View):
             ephemeral=True,
         )
 
+    async def handle_close(self, interaction: discord.Interaction) -> None:
+        if not self.quest.is_signup_open:
+            await interaction.response.send_message(
+                "Signups are already closed for this quest.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            via_api = await self.cog._close_signups_via_api(self.guild, self.quest)
+        except ValueError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+
+        if not via_api:
+            try:
+                self.quest.close_signups()
+            except ValueError as exc:
+                await interaction.followup.send(str(exc), ephemeral=True)
+                return
+            self.cog._persist_quest(self.guild.id, self.quest)
+        else:
+            refreshed = self.cog._fetch_quest(self.guild.id, self.quest.quest_id)
+            if refreshed is not None:
+                self.quest = refreshed
+            else:
+                try:
+                    self.quest.close_signups()
+                except ValueError:
+                    pass
+
+        await self.cog._sync_quest_announcement(
+            self.guild,
+            self.quest,
+            last_updated_at=datetime.now(timezone.utc),
+        )
+
+        await self._notify_channel_closed()
+        await send_demo_log(
+            self.cog.bot,
+            self.guild,
+            f"{self.reviewer.mention} closed signups for `{self.quest.title or self.quest.quest_id}`",
+        )
+
+        self._refresh_from_quest()
+        await interaction.message.edit(
+            content=self.render_panel_text(), view=self
+        )
+
+        await interaction.followup.send(
+            "Signups closed. Players can no longer request to join.",
+            ephemeral=True,
+        )
+
     async def _notify_player(self, signup: PlayerSignUp, *, accepted: bool) -> None:
         member = self.guild.get_member(signup.user_id.number)
         if member is None:
@@ -701,6 +771,33 @@ class SignupDecisionView(discord.ui.View):
         try:
             await channel.send(
                 f"{self.reviewer.mention} {action} {label} for quest `{self.quest.title or self.quest.quest_id}`."
+            )
+        except Exception:
+            pass
+
+    async def _notify_channel_closed(self) -> None:
+        channel_id_raw = self.quest.channel_id
+        if not channel_id_raw:
+            return
+
+        try:
+            channel_id = int(channel_id_raw)
+        except (TypeError, ValueError):
+            channel = None
+        else:
+            try:
+                channel = self.guild.get_channel(channel_id)
+                if channel is None:
+                    channel = await self.guild.fetch_channel(channel_id)
+            except Exception:
+                channel = None
+
+        if channel is None:
+            return
+
+        try:
+            await channel.send(
+                f"{self.reviewer.mention} closed signups for quest `{self.quest.title or self.quest.quest_id}`."
             )
         except Exception:
             pass
@@ -762,6 +859,16 @@ class SignupDeclineButton(discord.ui.Button):
         view = self.view
         if isinstance(view, SignupDecisionView):
             await view.handle_decline(interaction)
+
+
+class SignupCloseButton(discord.ui.Button):
+    def __init__(self) -> None:
+        super().__init__(label="Close Signups", style=discord.ButtonStyle.secondary)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view = self.view
+        if isinstance(view, SignupDecisionView):
+            await view.handle_close(interaction)
 
 
 class QuestCommandsCog(commands.Cog):
@@ -1479,6 +1586,49 @@ class QuestCommandsCog(commands.Cog):
         except Exception as exc:
             logging.warning(
                 "Signup removal API request failed for quest %s in guild %s: %s",
+                quest.quest_id,
+                guild.id,
+                exc,
+            )
+            return False
+
+    async def _close_signups_via_api(
+        self,
+        guild: discord.Guild,
+        quest: Quest,
+    ) -> bool:
+        if not QUEST_API_BASE_URL:
+            return False
+
+        base_url = QUEST_API_BASE_URL.rstrip("/")
+        url = f"{base_url}/v1/guilds/{guild.id}/quests/{quest.quest_id}:closeSignups"
+
+        timeout = aiohttp.ClientTimeout(total=10)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url) as resp:
+                    if resp.status in (200, 201):
+                        return True
+
+                    raw = await resp.text()
+                    detail = self._extract_api_detail(raw)
+
+                    if resp.status in (400, 404):
+                        raise ValueError(detail or "Unable to close signups.")
+
+                    logging.warning(
+                        "Close signups API returned %s for quest %s in guild %s: %s",
+                        resp.status,
+                        quest.quest_id,
+                        guild.id,
+                        detail or raw,
+                    )
+                    return False
+        except ValueError:
+            raise
+        except Exception as exc:
+            logging.warning(
+                "Close signups API request failed for quest %s in guild %s: %s",
                 quest.quest_id,
                 guild.id,
                 exc,
