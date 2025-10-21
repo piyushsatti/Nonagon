@@ -196,3 +196,32 @@ def test_add_signup_duplicate_returns_friendly_message(monkeypatch) -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"] == "You already requested to join this quest."
+
+
+def test_nudge_updates_timestamp_and_enforces_cooldown(monkeypatch) -> None:
+    fake_quests, fake_users, _, quest, _, _ = _setup_signup_env(monkeypatch)
+    referee = User(user_id=quest.referee_id, guild_id=quest.guild_id)
+    referee.enable_referee()
+    fake_users._store[(quest.guild_id, str(referee.user_id))] = referee
+
+    client = TestClient(app)
+
+    response = client.post(
+        f"/v1/guilds/{quest.guild_id}/quests/{quest.quest_id}:nudge",
+        json={"referee_id": str(referee.user_id)},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["last_nudged_at"] is not None
+
+    stored = fake_quests._store[(quest.guild_id, str(quest.quest_id))]
+    assert stored.last_nudged_at is not None
+
+    repeat = client.post(
+        f"/v1/guilds/{quest.guild_id}/quests/{quest.quest_id}:nudge",
+        json={"referee_id": str(referee.user_id)},
+    )
+
+    assert repeat.status_code == 400
+    assert "Nudge on cooldown" in repeat.json()["detail"]

@@ -383,6 +383,32 @@ class QuestSignupView(discord.ui.View):
         )
 
     @discord.ui.button(
+        label="Nudge",
+        style=discord.ButtonStyle.primary,
+        custom_id="quest_signup:nudge",
+        emoji="🔔",
+        row=1,
+    )
+    async def nudge_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        try:
+            quest_id_raw = self._resolve_quest_id(interaction)
+            quest_id = QuestID.parse(quest_id_raw)
+        except ValueError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            message = await self.cog._execute_nudge(interaction, quest_id)
+        except ValueError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+
+        await interaction.followup.send(message, ephemeral=True)
+
+    @discord.ui.button(
         label="Leave Quest",
         style=discord.ButtonStyle.danger,
         custom_id="quest_signup:leave",
@@ -1592,6 +1618,66 @@ class QuestCommandsCog(commands.Cog):
             )
             return False
 
+    async def _nudge_via_api(
+        self,
+        guild: discord.Guild,
+        quest: Quest,
+        referee: User,
+    ) -> tuple[bool, Optional[datetime]]:
+        if not QUEST_API_BASE_URL:
+            return False, None
+
+        base_url = QUEST_API_BASE_URL.rstrip("/")
+        url = f"{base_url}/v1/guilds/{guild.id}/quests/{quest.quest_id}:nudge"
+        payload = {"referee_id": str(referee.user_id)}
+
+        timeout = aiohttp.ClientTimeout(total=10)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, json=payload) as resp:
+                    if resp.status in (200, 201):
+                        api_timestamp: Optional[datetime] = None
+                        try:
+                            data = await resp.json()
+                        except Exception:
+                            data = None
+                        if isinstance(data, dict):
+                            raw_ts = data.get("last_nudged_at")
+                            if isinstance(raw_ts, str):
+                                iso_value = raw_ts.strip()
+                                if iso_value.endswith("Z"):
+                                    iso_value = iso_value[:-1] + "+00:00"
+                                try:
+                                    api_timestamp = datetime.fromisoformat(iso_value)
+                                except ValueError:
+                                    api_timestamp = None
+                        return True, api_timestamp
+
+                    raw = await resp.text()
+                    detail = self._extract_api_detail(raw)
+
+                    if resp.status in (400, 404):
+                        raise ValueError(detail or "Unable to nudge quest.")
+
+                    logging.warning(
+                        "Nudge API returned %s for quest %s in guild %s: %s",
+                        resp.status,
+                        quest.quest_id,
+                        guild.id,
+                        detail or raw,
+                    )
+                    return False, None
+        except ValueError:
+            raise
+        except Exception as exc:
+            logging.warning(
+                "Nudge API request failed for quest %s in guild %s: %s",
+                quest.quest_id,
+                guild.id,
+                exc,
+            )
+            return False, None
+
     async def _close_signups_via_api(
         self,
         guild: discord.Guild,
@@ -1817,6 +1903,114 @@ class QuestCommandsCog(commands.Cog):
             if detail is not None:
                 return str(detail)
         return raw
+
+    async def _execute_nudge(
+        self,
+        interaction: discord.Interaction,
+        quest_id: QuestID,
+    ) -> str:
+        guild = interaction.guild
+        if guild is None:
+            raise ValueError("This action must be performed inside a guild.")
+
+        member = interaction.user
+        if not isinstance(member, discord.Member):
+            raise ValueError("Only guild members can nudge quests.")
+
+        user = await self._get_cached_user(member)
+        if not user.is_referee:
+            raise ValueError("Only referees can nudge quests.")
+
+        quest = self._fetch_quest(guild.id, quest_id)
+        if quest is None:
+            raise ValueError("Quest not found.")
+
+        if quest.referee_id != user.user_id:
+            raise ValueError("Only the quest's referee can nudge this quest.")
+
+        now = datetime.now(timezone.utc)
+        cooldown = timedelta(hours=48)
+        last_nudged_at = quest.last_nudged_at
+        if last_nudged_at is not None:
+            if last_nudged_at.tzinfo is None or last_nudged_at.tzinfo.utcoffset(last_nudged_at) is None:
+                last_nudged_at = last_nudged_at.replace(tzinfo=timezone.utc)
+            elapsed = now - last_nudged_at
+            if elapsed < cooldown:
+                remaining = cooldown - elapsed
+                total_seconds = int(remaining.total_seconds())
+                hours, remainder = divmod(total_seconds, 3600)
+                minutes = remainder // 60
+                parts: list[str] = []
+                if hours:
+                    parts.append(f"{hours}h")
+                if minutes:
+                    parts.append(f"{minutes}m")
+                if not parts:
+                    parts.append("less than a minute")
+                raise ValueError(
+                    "Nudge on cooldown. Try again in {}.".format(" ".join(parts))
+                )
+
+        try:
+            via_api, api_timestamp = await self._nudge_via_api(guild, quest, user)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+
+        nudge_timestamp = now
+        if via_api:
+            refreshed = self._fetch_quest(guild.id, quest_id)
+            if refreshed is not None:
+                quest = refreshed
+                nudge_timestamp = quest.last_nudged_at or now
+            elif api_timestamp is not None:
+                quest.last_nudged_at = api_timestamp
+                nudge_timestamp = api_timestamp
+            else:
+                quest.last_nudged_at = now
+                nudge_timestamp = now
+        else:
+            quest.last_nudged_at = now
+            self._persist_quest(guild.id, quest)
+
+        channel: Optional[Messageable] = None
+        try:
+            channel = guild.get_channel(int(quest.channel_id))
+            if channel is None:
+                channel = await guild.fetch_channel(int(quest.channel_id))
+        except Exception:
+            channel = None
+
+        jump_url = f"https://discord.com/channels/{guild.id}/{quest.channel_id}/{quest.message_id}"
+        quest_title = quest.title or str(quest.quest_id)
+        if channel is not None:
+            try:
+                await channel.send(
+                    f"{member.mention} nudged quest `{quest_title}`! {jump_url}"
+                )
+            except Exception:
+                pass
+
+        await self._sync_quest_announcement(
+            guild,
+            quest,
+            last_updated_at=nudge_timestamp if isinstance(nudge_timestamp, datetime) else now,
+        )
+
+        await send_demo_log(
+            self.bot,
+            guild,
+            f"{member.mention} nudged quest `{quest_title}`",
+        )
+
+        channel_display = getattr(channel, "mention", None) if channel else None
+        next_reference = nudge_timestamp if isinstance(nudge_timestamp, datetime) else now
+        if next_reference.tzinfo is None or next_reference.tzinfo.utcoffset(next_reference) is None:
+            next_reference = next_reference.replace(tzinfo=timezone.utc)
+        relative_epoch = int((next_reference + cooldown).timestamp())
+        relative_tag = f"<t:{relative_epoch}:R>"
+        if channel_display:
+            return f"Quest bumped in {channel_display}. Next nudge available {relative_tag}."
+        return f"Quest bumped. Next nudge available {relative_tag}."
 
     async def _execute_join(
         self,

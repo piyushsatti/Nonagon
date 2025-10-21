@@ -264,6 +264,57 @@ async def select_signup(guild_id: int, quest_id: str, user_id: str) -> APIQuest:
 
 
 @router.post(
+    "/{quest_id}:nudge",
+    response_model=APIQuest,
+    response_model_exclude_none=True,
+)
+async def nudge_quest(guild_id: int, quest_id: str, payload: dict) -> APIQuest:
+    try:
+        referee_id_raw = payload["referee_id"]
+    except KeyError:
+        raise HTTPException(status_code=400, detail="Missing field: referee_id")
+
+    referee = await _ensure_referee(guild_id, referee_id_raw)
+
+    quest = await _require_quest(guild_id, quest_id)
+
+    if quest.referee_id != referee.user_id:
+        raise HTTPException(
+            status_code=403, detail="Only the quest referee can nudge this quest."
+        )
+
+    cooldown = timedelta(hours=48)
+    now = datetime.now(timezone.utc)
+    last_nudged_at = quest.last_nudged_at
+    if last_nudged_at is not None:
+        if last_nudged_at.tzinfo is None or last_nudged_at.tzinfo.utcoffset(last_nudged_at) is None:
+            last_nudged_at = last_nudged_at.replace(tzinfo=timezone.utc)
+        elapsed = now - last_nudged_at
+        if elapsed < cooldown:
+            remaining = cooldown - elapsed
+            total_seconds = int(remaining.total_seconds())
+            hours, remainder = divmod(total_seconds, 3600)
+            minutes = remainder // 60
+            parts = []
+            if hours:
+                parts.append(f"{hours}h")
+            if minutes:
+                parts.append(f"{minutes}m")
+            if not parts:
+                parts.append("less than a minute")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Nudge on cooldown. Try again in {' '.join(parts)}.",
+            )
+
+    quest.last_nudged_at = now
+    quest.guild_id = guild_id
+    await quests_repo.upsert(guild_id, quest)
+
+    return quest_to_api(quest)
+
+
+@router.post(
     "/{quest_id}:closeSignups",
     response_model=APIQuest,
     response_model_exclude_none=True,

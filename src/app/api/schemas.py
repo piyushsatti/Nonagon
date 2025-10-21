@@ -85,6 +85,7 @@ class Quest(QuestIn):
     ended_at: Optional[datetime] = None
     signups_open: bool = True
     signups: List[dict] = []
+    last_nudged_at: Optional[datetime] = None
 
 
 # --- Summaries ---

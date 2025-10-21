@@ -144,6 +144,7 @@ def quest_to_api(q: DQuest) -> APIQuest:
         ended_at=_utc(getattr(q, "ended_at", None)),
         signups_open=bool(signups_open),
         signups=[_signup_to_api(s) for s in _list(getattr(q, "signups", None))],
+        last_nudged_at=_utc(getattr(q, "last_nudged_at", None)),
     )
 
 

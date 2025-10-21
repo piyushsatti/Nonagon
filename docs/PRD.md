@@ -22,70 +22,70 @@ This document outlines the Product Requirements Document (PRD) for the Nonagon D
 
 **Repository**: [GitHub - Nonagon](piyushsatti/nonagon)
 
-## 1. Problem Statement
-There are two main problems:
+- [x] **Story EP2-S1**  
+  As a Player, I want to request to join so the DM can review me.  
+  **Acceptance Criteria**  
+  Given I click Request to Join, When processed, Then a signup with status=APPLIED is stored and I receive an ephemeral confirmation.  
+  **DoD**  
+  - Role check enforced  
+  - Preview button rendered with logging  
+  - No persistence triggered  
+  **Tasks**  
+  - [x] Detect forge-channel messages in src/app/bot/cogs/QuestCommandsCog.py.  
+  - [x] Attach a discord.ui.View with Preview callback.  
+  - [x] Expose configurable forge channel setting.
 
-1. Admins do not have any data on the various activities going on in the server. Without data, insights cannot be drawn for growth.
-2. Quest announcement, player sign-up management, and adventure summary tracking is a tedious process with a lot of manual labor. Automated solutions should exist to ease the burden on players and referees.
+- [x] **Story EP2-S2**  
+  As a DM, I want to view pending requests so I can decide who joins.  
+  **Acceptance Criteria**  
+  Given APPLIED signups exist, When I open the requests panel, Then I see each applicant with Accept/Decline controls.  
+  **DoD**  
+  - DM-only view generated  
+  - Pagination for >25 requests  
+  - Errors surfaced ephemerally  
+  **Tasks**  
+  - [x] Implement /quest requests (slash or panel).  
+  - [x] Render embed listing APPLIED players with metadata.  
+  - [x] Provide custom IDs tying actions to players.
 
-## 2. Goals
+- [x] **Story EP2-S3**  
+  As a DM, I want to accept a player so the roster updates automatically.  
+  **Acceptance Criteria**  
+  Given I click Accept, When completed, Then the signup status becomes SELECTED, the quest embed shows the player, and the player is notified.  
+  **DoD**  
+  - Calls POST /v1/quests/{id}/signups/{user_id}:select  
+  - Embed re-rendered with SELECTED section  
+  - Notification delivered ephemerally or via DM  
+  **Tasks**  
+  - [x] Implement Accept button callback.  
+  - [x] Update embed builder to highlight SELECTED players.  
+  - [x] Send friendly confirmation to player.
 
-1. Deliver guided quest management inside Discord:
+- [x] **Story EP2-S4**  
+  As a DM, I want to decline applicants so I manage capacity.  
+  **Acceptance Criteria**  
+  Given I click Decline, When completed, Then the signup is removed and the player receives a decline notification.  
+  **DoD**  
+  - Calls DELETE /v1/quests/{id}/signups/{user_id}  
+  - Embed re-rendered without applicant  
+  - Decline logged  
+  **Tasks**  
+  - [x] Add Decline button callback.  
+  - [x] Handle missing signup gracefully.  
+  - [x] Send decline message ephemerally.
 
-   * DMs draft, preview, approve, and publish quests from a forge channel.
-   * Quest announcements stay up to date with roster, state, and identifiers.
-
-2. Control enrollment while streamlining player onboarding:
-
-   * Players request to join and await explicit DM approval.
-   * First-time players register characters via a friendly modal flow.
-
-3. Maintain supportive tooling and documentation:
-
-   * DM-only nudges resurface quests on cooldown.
-   * `/lookup` command shares reference material quickly.
-   * Demo markdown keeps the "green path" discoverable for new contributors.
-
-## 3. Stakeholders
-
-* **Member**: Participates in community without gaming.
-* **Player**: Joins games and writes player-side summaries.
-* **Referee**: Hosts games, accepts signees, writes DM summaries.
-* **Admin**: Full access to data and edits.
-
-## 4. Scope & Deliverables
-
-**In Scope**
-
-* Data tracking of member interactions.
-* Quest lifecycle automation.
-* Role-based permissions (Member, Player, Referee, Admin).
-
-**Out of Scope**
-
-* Complex analytics dashboards.
-* End-user querying of data.
-
-## 5. Requirements
-### Functional (User Stories)
-* **Member**:
-
-  * As a Member, I want polished quest embeds with clear status (Active/Closed), so I instantly know if signups remain open.
-
-* **Player**:
-
-  * As a Player, I want to request to join quests and receive ephemeral confirmation, so I have clarity on my signup.
-  * As a Player, I want a quick modal to register my first character, so onboarding does not block participation.
-  * As a Player, I want reminders and notifications to be ephemeral, so channels stay tidy.
-
-* **Referee (DM)**:
-
-  * As a DM, I want to draft and preview quests in a forge flow, so I can iterate before announcing.
-  * As a DM, I want to accept or decline join requests, so I control the roster.
-  * As a DM, I want a nudge button with cooldown, so I can re-promote quests responsibly.
-
-* **Admin / Staff**:
-
+- [x] **Story EP2-S5**  
+  As a Developer, I want duplicate protections respected so the data stays clean.  
+  **Acceptance Criteria**  
+  Given a player already applied, When they request again, Then an error returns and no new entry is created.  
+  **DoD**  
+  - Domain guard remains intact  
+  - API tests cover duplicate branch  
+  - Messaging localized  
+  **Tasks**  
+  - [x] Confirm duplicate guard in Quest.add_signup.  
+  - [x] Add regression tests in tests/api/test_quests.py.  
+  - [x] Improve error string for Discord surfaces.
   * As Admin/Staff, I want `/lookup` and refreshed demo docs, so onboarding others remains efficient.
 
 ### Non-Functional (Constraints)
@@ -260,44 +260,44 @@ Given a player already applied, When they request again, Then an error returns a
 **Milestones**: Button visibility -> Cooldown enforcement -> Logging.  
 **NFRs**: 48h cooldown, idempotent logging.
 
-**Story EP3-S1**  
-As a DM, I want a Nudge button only I can see so I avoid confusing players.  
-**Acceptance Criteria**  
-Given a quest embed, When I (as DM) view it, Then a [Nudge emoji] Nudge button appears and hides for others.  
-**DoD**  
-- Role gate ensures DM visibility  
-- Button rendered near Request controls  
-- UI logged  
-**Tasks**  
-- Add Nudge button to QuestSignupView.  
-- Filter visibility per interaction user.  
-- Document button behavior in demo.
+- [x] **Story EP3-S1**  
+  As a DM, I want a Nudge button only I can see so I avoid confusing players.  
+  **Acceptance Criteria**  
+  Given a quest embed, When I (as DM) view it, Then a [Nudge emoji] Nudge button appears and hides for others.  
+  **DoD**  
+  - Role gate ensures DM visibility  
+  - Button rendered near Request controls  
+  - UI logged  
+  **Tasks**  
+  - [x] Add Nudge button to QuestSignupView.  
+  - [x] Filter visibility per interaction user.  
+  - [ ] Document button behavior in demo.
 
-**Story EP3-S2**  
-As a DM, I want nudges to respect a 48h cooldown so announcements stay tasteful.  
-**Acceptance Criteria**  
-Given the last nudge occurred < 48h ago, When I click Nudge, Then I see remaining cooldown; else a bump message posts referencing the quest.  
-**DoD**  
-- last_nudged_at stored per quest  
-- Cooldown feedback returned  
-- Bump message links original post  
-**Tasks**  
-- Add last_nudged_at field to Quest model/repo.  
-- Implement POST /v1/quests/{id}:nudge handler.  
-- Render bump embed referencing quest.
+- [ ] **Story EP3-S2** *(In Progress)*  
+  As a DM, I want nudges to respect a 48h cooldown so announcements stay tasteful.  
+  **Acceptance Criteria**  
+  Given the last nudge occurred < 48h ago, When I click Nudge, Then I see remaining cooldown; else a bump message posts referencing the quest.  
+  **DoD**  
+  - last_nudged_at stored per quest  
+  - Cooldown feedback returned  
+  - Bump message links original post  
+  **Tasks**  
+  - [x] Add last_nudged_at field to Quest model/repo.  
+  - [x] Implement POST /v1/quests/{id}:nudge handler.  
+  - [ ] Render bump embed referencing quest.
 
-**Story EP3-S3**  
-As a Moderator, I want nudge activity logged so I can audit outreach.  
-**Acceptance Criteria**  
-Given a successful nudge, When it posts, Then logs include quest_id, DM, and timestamp.  
-**DoD**  
-- send_demo_log invoked  
-- Errors captured with context  
-- Tests validate logging path  
-**Tasks**  
-- Tie logging into nudge success path.  
-- Add unit tests using logging doubles.  
-- Update moderation SOP docs.
+- [ ] **Story EP3-S3** *(In Progress)*  
+  As a Moderator, I want nudge activity logged so I can audit outreach.  
+  **Acceptance Criteria**  
+  Given a successful nudge, When it posts, Then logs include quest_id, DM, and timestamp.  
+  **DoD**  
+  - send_demo_log invoked  
+  - Errors captured with context  
+  - Tests validate logging path  
+  **Tasks**  
+  - [x] Tie logging into nudge success path.  
+  - [ ] Add unit tests using logging doubles.  
+  - [ ] Update moderation SOP docs.
 
 ### Epic 4: Friendly Player Registration Flow (P1)
 **Goal**: Onboard first-time players without friction.  
