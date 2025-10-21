@@ -25,6 +25,7 @@ This page documents the bot’s slash commands, their inputs, permission require
   - Logging: info log lists extensions
 
 ## Quest Lifecycle
+
 - `createquest`
   - Inputs: `title: str`, `start_time_epoch: int>=0`, `duration_hours: int[1..48]`, `description?: str`, `image_url?: str`
   - Permissions: must run in a guild; user must be REFEREE
@@ -51,7 +52,20 @@ This page documents the bot’s slash commands, their inputs, permission require
   - Output: ephemeral confirmation; channel notice encouraging summaries
   - Logging: info log; demo log
 
+## Quest Signup Buttons
+
+- `Request to Join`
+  - Visible to players; opens the character selector or quick-create modal.
+  - Persists an APPLIED signup and responds ephemerally.
+- `Review Requests`
+  - Visible to referees; launches the approvals panel with Accept/Decline controls.
+- `Nudge`
+  - Visible to the owning referee only; enforces a 48h cooldown using quest `last_nudged_at`.
+  - Posts a gold “Quest Nudge” embed linking back to the announcement message.
+  - Triggers demo logging so moderators can audit outreach.
+
 ## Characters
+
 - `character_add`
   - Inputs: `name: str`, `ddb_link: str`, `character_thread_link: str`, `token_link: str`, `art_link: str`, `description?: str`, `notes?: str`, `tags?: str`
   - Permissions: must run in a guild; member only
@@ -64,6 +78,7 @@ This page documents the bot’s slash commands, their inputs, permission require
   - Logging: none
 
 ## Stats
+
 - `stats`
   - Inputs: none
   - Permissions: must run in a guild; member only
@@ -81,6 +96,7 @@ This page documents the bot’s slash commands, their inputs, permission require
   - Logging: none
 
 ## Help
+
 - `help`
   - Inputs: none
   - Permissions: none enforced
@@ -93,6 +109,7 @@ This page documents the bot’s slash commands, their inputs, permission require
   - Logging: none
 
 ## Direct Messages
+
 - `register` (DM only)
   - Inputs: none
   - Permissions: must be used in DM; user must share a guild with the bot
@@ -100,6 +117,7 @@ This page documents the bot’s slash commands, their inputs, permission require
   - Logging: exceptions logged on DM edge cases
 
 ## Demo Utilities
+
 - `demo_about`
   - Inputs: none
   - Permissions: none enforced

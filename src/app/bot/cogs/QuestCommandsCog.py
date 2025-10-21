@@ -903,6 +903,7 @@ class QuestCommandsCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._forge_previews: dict[tuple[int, int], ForgePreviewState] = {}
+        self._demo_log = send_demo_log
 
     # ---------- Quest Embed Helpers ----------
 
@@ -981,6 +982,38 @@ class QuestCommandsCog(commands.Cog):
             last_updated_at=last_updated_at,
         )
         return build_quest_embed(data)
+
+    def _build_nudge_embed(
+        self,
+        quest: Quest,
+        member: discord.Member,
+        jump_url: str,
+        *,
+        bumped_at: datetime,
+    ) -> discord.Embed:
+        quest_title = quest.title or str(quest.quest_id)
+        embed = discord.Embed(
+            title=f"Quest Nudge: {quest_title}",
+            description=(
+                f"{member.mention} bumped this quest.\n"
+                f"[View announcement]({jump_url})"
+            ),
+            color=discord.Color.gold(),
+            timestamp=bumped_at,
+        )
+
+        if quest.starting_at:
+            start_ts = quest.starting_at
+            if start_ts.tzinfo is None or start_ts.tzinfo.utcoffset(start_ts) is None:
+                start_ts = start_ts.replace(tzinfo=timezone.utc)
+            embed.add_field(
+                name="Start Time",
+                value=f"<t:{int(start_ts.timestamp())}:F>",
+                inline=False,
+            )
+
+        embed.set_footer(text=f"Quest ID: {quest.quest_id}")
+        return embed
 
     def _is_forge_channel(self, channel: Optional[Messageable]) -> bool:
         if channel is None:
@@ -1678,6 +1711,23 @@ class QuestCommandsCog(commands.Cog):
             )
             return False, None
 
+    async def _emit_nudge_log(
+        self,
+        guild: discord.Guild,
+        member: discord.Member,
+        quest_title: str,
+    ) -> None:
+        message = f"{member.mention} nudged quest `{quest_title}`"
+        try:
+            await self._demo_log(self.bot, guild, message)
+        except Exception as exc:
+            logging.warning(
+                "Failed to emit nudge log for quest %s in guild %s",
+                quest_title,
+                getattr(guild, "id", "unknown"),
+                exc_info=exc,
+            )
+
     async def _close_signups_via_api(
         self,
         guild: discord.Guild,
@@ -1984,9 +2034,13 @@ class QuestCommandsCog(commands.Cog):
         quest_title = quest.title or str(quest.quest_id)
         if channel is not None:
             try:
-                await channel.send(
-                    f"{member.mention} nudged quest `{quest_title}`! {jump_url}"
+                embed = self._build_nudge_embed(
+                    quest,
+                    member,
+                    jump_url,
+                    bumped_at=nudge_timestamp,
                 )
+                await channel.send(embed=embed)
             except Exception:
                 pass
 
@@ -1996,11 +2050,7 @@ class QuestCommandsCog(commands.Cog):
             last_updated_at=nudge_timestamp if isinstance(nudge_timestamp, datetime) else now,
         )
 
-        await send_demo_log(
-            self.bot,
-            guild,
-            f"{member.mention} nudged quest `{quest_title}`",
-        )
+        await self._emit_nudge_log(guild, member, quest_title)
 
         channel_display = getattr(channel, "mention", None) if channel else None
         next_reference = nudge_timestamp if isinstance(nudge_timestamp, datetime) else now

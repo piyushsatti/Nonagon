@@ -7,7 +7,8 @@ A lightweight system that helps players sign up for quests, referees run session
 
 ---
 
-###  Quick Start
+## Quick Start
+
 | Section | Description |
 |--------|-------------|
 | [Getting Started](../README.md) | Install, configure, and run the bot locally |
@@ -15,11 +16,14 @@ A lightweight system that helps players sign up for quests, referees run session
 | [PRD & Use Cases](PRD.md) | In-depth breakdown of features and user stories |
 | [Discord Commands](discord.md) | Slash commands: inputs, permissions, outputs |
 | [API Reference](API.md) | REST endpoints and schemas |
+| [Moderation SOP](moderation.md) | Logging expectations and review checklist |
 
 ---
 
-###  Project Status
+## Project Status
+
 **Experimental (multi-guild):**
+
 - Per-guild data model and indexes (`guild_id` everywhere)
 - Guild-scoped Users API under `/v1/guilds/{guild_id}/users`
 - Migration script to backfill `guild_id` on legacy docs

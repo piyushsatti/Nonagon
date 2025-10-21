@@ -271,9 +271,9 @@ Given a player already applied, When they request again, Then an error returns a
   **Tasks**  
   - [x] Add Nudge button to QuestSignupView.  
   - [x] Filter visibility per interaction user.  
-  - [ ] Document button behavior in demo.
+  - [x] Document button behavior in demo.
 
-- [ ] **Story EP3-S2** *(In Progress)*  
+- [x] **Story EP3-S2**  
   As a DM, I want nudges to respect a 48h cooldown so announcements stay tasteful.  
   **Acceptance Criteria**  
   Given the last nudge occurred < 48h ago, When I click Nudge, Then I see remaining cooldown; else a bump message posts referencing the quest.  
@@ -284,9 +284,9 @@ Given a player already applied, When they request again, Then an error returns a
   **Tasks**  
   - [x] Add last_nudged_at field to Quest model/repo.  
   - [x] Implement POST /v1/quests/{id}:nudge handler.  
-  - [ ] Render bump embed referencing quest.
+  - [x] Render bump embed referencing quest.
 
-- [ ] **Story EP3-S3** *(In Progress)*  
+- [x] **Story EP3-S3**  
   As a Moderator, I want nudge activity logged so I can audit outreach.  
   **Acceptance Criteria**  
   Given a successful nudge, When it posts, Then logs include quest_id, DM, and timestamp.  
@@ -296,8 +296,8 @@ Given a player already applied, When they request again, Then an error returns a
   - Tests validate logging path  
   **Tasks**  
   - [x] Tie logging into nudge success path.  
-  - [ ] Add unit tests using logging doubles.  
-  - [ ] Update moderation SOP docs.
+  - [x] Add unit tests using logging doubles.  
+  - [x] Update moderation SOP docs.
 
 ### Epic 4: Friendly Player Registration Flow (P1)
 **Goal**: Onboard first-time players without friction.  
