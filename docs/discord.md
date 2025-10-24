@@ -105,11 +105,6 @@ This page documents the bot’s slash commands, their inputs, permission require
   - Permissions: none enforced
   - Output: ephemeral embed with quickstart and links
   - Logging: none
-- `invite`
-  - Inputs: none
-  - Permissions: none enforced
-  - Output: ephemeral OAuth2 invite link or config error
-  - Logging: none
 
 ## Direct Messages
 
@@ -128,7 +123,7 @@ This page documents the bot’s slash commands, their inputs, permission require
   - Logging: none
 - `demo_reset`
   - Inputs: none
-  - Permissions: administrator only; must run in a guild
+  - Permissions: guild owner only
   - Output: ephemeral confirmation after DB reset and reseed
   - Logging: info log; demo log
 

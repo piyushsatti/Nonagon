@@ -10,7 +10,7 @@ from app.infra.mongo.guild_adapter import upsert_user_sync
 from app.infra.serialization import to_bson
 
 from ..domain.models.UserModel import User
-from .config import BOT_FLUSH_VIA_ADAPTER, BOT_TOKEN, PRIMARY_GUILD_ID
+from .config import BOT_FLUSH_VIA_ADAPTER, BOT_TOKEN
 from .database import db_client
 
 
@@ -359,6 +359,4 @@ if __name__ == "__main__":
     intents.members = True
     intents.voice_states = True
 
-    asyncio.run(
-        Nonagon(intents=intents, primary_guild_id=PRIMARY_GUILD_ID).start(BOT_TOKEN)
-    )
+    asyncio.run(Nonagon(intents=intents).start(BOT_TOKEN))

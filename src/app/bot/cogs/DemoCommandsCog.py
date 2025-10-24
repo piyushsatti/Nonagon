@@ -7,7 +7,6 @@ from discord import app_commands
 from discord.ext import commands
 
 from app.bot import database
-from app.bot.config import DEMO_RESET_ENABLED
 from app.bot.utils.log_stream import send_demo_log
 from app.domain.models.EntityIDModel import CharacterID, QuestID, UserID
 
@@ -106,15 +105,16 @@ class DemoCommandsCog(commands.Cog):
     @app_commands.checks.has_permissions(administrator=True)
     @app_commands.command(name="demo_reset", description="Reset demo data for this guild.")
     async def demo_reset(self, interaction: discord.Interaction) -> None:
-        if not DEMO_RESET_ENABLED:
-            await interaction.response.send_message(
-                "Demo reset is disabled on this deployment.", ephemeral=True
-            )
-            return
-
         if interaction.guild is None:
             await interaction.response.send_message(
                 "This command must be used inside a guild.", ephemeral=True
+            )
+            return
+
+        if interaction.guild.owner_id != interaction.user.id:
+            await interaction.response.send_message(
+                "Only the guild owner can trigger the demo reset.",
+                ephemeral=True,
             )
             return
 

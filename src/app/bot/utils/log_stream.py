@@ -5,30 +5,37 @@ from typing import Optional
 
 import discord
 
-from app.bot.config import DEMO_LOG_CHANNEL_ID
+from app.bot.services import guild_settings_store
 
 
 async def send_demo_log(bot: discord.Client, guild: discord.Guild, message: str) -> None:
     """Send a log message to the configured demo log channel, if any."""
 
-    if not DEMO_LOG_CHANNEL_ID:
+    settings = guild_settings_store.fetch_settings(guild.id)
+    if not settings:
+        return
+
+    channel_id = settings.get("log_channel_id")
+    if channel_id is None:
         return
 
     try:
-        channel_id = int(DEMO_LOG_CHANNEL_ID)
+        channel_id_int = int(channel_id)
     except (TypeError, ValueError):
-        logging.warning("Invalid DEMO_LOG_CHANNEL_ID configured: %s", DEMO_LOG_CHANNEL_ID)
+        logging.warning(
+            "Invalid log_channel_id stored for guild %s: %s", guild.id, channel_id
+        )
         return
 
-    channel: Optional[discord.abc.Messageable] = guild.get_channel(channel_id)  # type: ignore[assignment]
+    channel: Optional[discord.abc.Messageable] = guild.get_channel(channel_id_int)  # type: ignore[assignment]
 
     if channel is None:
         try:
-            channel = await guild.fetch_channel(channel_id)
+            channel = await guild.fetch_channel(channel_id_int)
         except Exception as exc:  # pragma: no cover - best effort logging
             logging.warning(
                 "Failed to fetch demo log channel %s in guild %s: %s",
-                channel_id,
+                channel_id_int,
                 guild.id,
                 exc,
             )
@@ -39,7 +46,7 @@ async def send_demo_log(bot: discord.Client, guild: discord.Guild, message: str)
     except Exception as exc:  # pragma: no cover - best effort logging
         logging.warning(
             "Failed to send demo log message to channel %s in guild %s: %s",
-            channel_id,
+            channel_id_int,
             guild.id,
             exc,
         )

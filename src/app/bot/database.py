@@ -7,11 +7,7 @@ from .config import MONGO_URI
 
 
 def _make_client() -> MongoClient:
-  """Create a MongoClient with optional TLS if explicitly enabled.
-
-  By default, containers talk to the local Mongo service without TLS.
-  Set `MONGO_TLS=true` and ensure `certifi` is installed if you want TLS.
-  """
+  """Create a MongoClient for the shared MongoDB deployment."""
   # Resolve URI with a clear error if missing
   uri = (MONGO_URI or os.getenv("MONGODB_URI") or "").strip()
   if not uri:
@@ -19,16 +15,7 @@ def _make_client() -> MongoClient:
       "MongoDB URI is not set. Provide ATLAS_URI in .env (mapped to MONGO_URI/MONGODB_URI)."
     )
 
-  use_tls = os.getenv("MONGO_TLS", "false").lower() in {"1", "true", "yes"}
   kwargs = {"server_api": ServerApi('1')}
-
-  if use_tls:
-    try:
-      import certifi  # type: ignore
-      kwargs.update({"tls": True, "tlsCAFile": certifi.where()})
-    except ModuleNotFoundError:
-      logging.warning("MONGO_TLS requested but 'certifi' not installed; proceeding without TLS")
-
   return MongoClient(uri, **kwargs)
 
 

@@ -20,26 +20,6 @@ class ExtensionManagerCog(commands.Cog):
         self.bot = bot
         super().__init__()
 
-    async def cog_load(self) -> None:
-        self.bot.tree.add_command(self.load_extension)
-        self.bot.tree.add_command(self.unload_extension)
-        self.bot.tree.add_command(self.reload_extension)
-        self.bot.tree.add_command(self.list_extensions)
-
-    async def cog_unload(self) -> None:
-        self.bot.tree.remove_command(
-            self.load_extension.name, type=self.load_extension.type
-        )
-        self.bot.tree.remove_command(
-            self.unload_extension.name, type=self.unload_extension.type
-        )
-        self.bot.tree.remove_command(
-            self.reload_extension.name, type=self.reload_extension.type
-        )
-        self.bot.tree.remove_command(
-            self.list_extensions.name, type=self.list_extensions.type
-        )
-
     @app_commands.command(name="load", description="Load a bot extension module.")
     async def load_extension(
         self, interaction: discord.Interaction, extension: str

@@ -24,17 +24,16 @@ Nonagon is a multi-guild Discord automation platform that streamlines quest sche
 
 | Variable | Required | Notes |
 |----------|----------|-------|
-| `ATLAS_URI` | Yes | MongoDB connection string used by both API and bot containers. |
+| `ATLAS_URI` | Yes | MongoDB connection string shared by both services. |
+| `MONGO_URI` | Optional | Alias used by the bot; defaults to `ATLAS_URI`. |
+| `MONGODB_URI` | Optional | Alias used by the API; defaults to `ATLAS_URI`. |
 | `DB_NAME` | Yes | Logical database name for the API service (e.g., `nonagon`). |
 | `BOT_TOKEN` | Yes | Discord bot token for authenticating the gateway connection. |
-| `BOT_CLIENT_ID` | Yes | Discord application client ID used when generating invite links. |
-
-> **Action Item:** The current compose file wires `MONGODB_URI` for the API service and `MONGO_URI` for the bot service. Standardize on a single variable name (e.g., `MONGO_URI`) across `docker-compose.dev.yml` and the FastAPI code under `src/app/api` to avoid configuration drift.
 
 ### Running the Application
 
 ```bash
-docker compose -f docker-compose.dev.yml up --build -d
+docker compose up --build -d
 ```
 
 This builds the images, starts the API on port `8000`, and launches the Discord bot.
