@@ -56,5 +56,5 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "W"]
-# Allow tabs (W191) and relax long-lines (E501) and unused-imports (F401)
-ignore = ["W191", "E501", "F401"]
+# Allow tabs (W191); enforce unused imports (F401); relax long-lines (E501)
+ignore = ["W191", "E501"]
