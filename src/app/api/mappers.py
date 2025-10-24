@@ -152,7 +152,6 @@ def quest_to_api(q: DQuest) -> APIQuest:
 
 
 def summary_to_api(s):
-	from app.domain.models.SummaryModel import QuestSummary as DSumm  # lazy import
 
 	# NOTE: your schema field is spelled “descroption”; we map domain.description to that name.
 	return APISummary(

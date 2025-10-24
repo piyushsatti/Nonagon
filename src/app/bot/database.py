@@ -11,9 +11,9 @@ def _make_client() -> MongoClient:
 	# Resolve URI with a clear error if missing
 	uri = (MONGO_URI or os.getenv("MONGODB_URI") or "").strip()
 	if not uri:
-	raise RuntimeError(
-		"MongoDB URI is not set. Provide ATLAS_URI in .env (mapped to MONGO_URI/MONGODB_URI)."
-	)
+		raise RuntimeError(
+			"MongoDB URI is not set. Provide ATLAS_URI in .env (mapped to MONGO_URI/MONGODB_URI)."
+		)
 
 	kwargs = {"server_api": ServerApi('1')}
 	return MongoClient(uri, **kwargs)

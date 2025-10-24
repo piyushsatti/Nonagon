@@ -46,7 +46,7 @@ class DMCommandsCog(commands.Cog):
 
 		await interaction.response.defer(ephemeral=True, thinking=True)
 		try:
-			user = await self._get_or_create_user(interaction.user)
+			await self._get_or_create_user(interaction.user)
 		except ValueError as exc:
 			await interaction.followup.send(str(exc), ephemeral=True)
 			return

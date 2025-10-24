@@ -51,16 +51,16 @@ def _guild_db_names(target: str | None = None) -> Sequence[str]:
 
 def _coerce_entity_id(payload, prefix: str) -> str | None:
 	if isinstance(payload, dict):
-	value = payload.get("value")
-	if isinstance(value, str) and value:
-		return value
-	number = payload.get("number")
-	if number is not None:
-		return f"{payload.get('prefix', prefix)}{number}"
+		value = payload.get("value")
+		if isinstance(value, str) and value:
+			return value
+		number = payload.get("number")
+		if number is not None:
+			return f"{payload.get('prefix', prefix)}{number}"
 	elif isinstance(payload, str) and payload:
-	return payload
+		return payload
 	elif isinstance(payload, int):
-	return f"{prefix}{payload}"
+		return f"{prefix}{payload}"
 	return None
 
 
