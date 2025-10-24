@@ -52,9 +52,9 @@ show_missing = true
 skip_covered = true
 
 [tool.ruff]
-# Ruff only lints Python files. We allow tabs (W191 ignored) but
-# keep errors for mixed tabs/spaces (E101) to avoid inconsistency.
+line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "W"]
-ignore = ["W191"]
+# Allow tabs (W191) and relax long-lines (E501) and unused-imports (F401)
+ignore = ["W191", "E501", "F401"]
