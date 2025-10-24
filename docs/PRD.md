@@ -73,11 +73,11 @@ Deliver a guild-friendly Discord companion that streamlines the full quest lifec
 
 ## 7. Epics and Stories
 ### EP1 - Quest Forge Flow (Priority P1, Status: Planned)
-**Goal**: Enable DMs to draft, preview, and finalize quests inside Discord.  
-**Scope**: Forge channel previews, approve and discard actions, quest board publishing.  
-**Out of Scope**: Advanced markdown parsing, multi-message drafts.  
-**Dependencies**: Quest embed builder, FastAPI quest creation endpoint.  
-**Milestones**: Preview button -> Approve and Discard actions -> Thread previews -> Publish.  
+**Goal**: Enable DMs to draft, preview, and finalize quests inside Discord.
+**Scope**: Forge channel previews, approve and discard actions, quest board publishing.
+**Out of Scope**: Advanced markdown parsing, multi-message drafts.
+**Dependencies**: Quest embed builder, FastAPI quest creation endpoint.
+**Milestones**: Preview button -> Approve and Discard actions -> Thread previews -> Publish.
 **Non-Functional Notes**: Avoid database writes before approval, make discard idempotent, log every action.
 
 #### Story EP1-S1 - Preview Forge Messages
@@ -151,11 +151,11 @@ Deliver a guild-friendly Discord companion that streamlines the full quest lifec
   - [ ] Add regression tests in `tests/domain/models/test_quest_model.py`.
 
 ### EP2 - Controlled Sign-Up Management (Priority P1, Status: Complete)
-**Goal**: Let DMs approve or decline players before they join quests.  
-**Scope**: Request button, review panel, Accept and Decline updates, embed refresh.  
-**Out of Scope**: Automated waitlisting, capacity caps.  
-**Dependencies**: Mongo signups, FastAPI signup endpoints.  
-**Milestones**: Request flow -> Review UI -> Accept and Decline actions -> Embed synchronization.  
+**Goal**: Let DMs approve or decline players before they join quests.
+**Scope**: Request button, review panel, Accept and Decline updates, embed refresh.
+**Out of Scope**: Automated waitlisting, capacity caps.
+**Dependencies**: Mongo signups, FastAPI signup endpoints.
+**Milestones**: Request flow -> Review UI -> Accept and Decline actions -> Embed synchronization.
 **Non-Functional Notes**: Maintain duplicate prevention, role checks, and comprehensive logging.
 
 #### Story EP2-S1 - Request to Join
@@ -231,11 +231,11 @@ Deliver a guild-friendly Discord companion that streamlines the full quest lifec
   - [ ] Admin and staff need `/lookup` updates and refreshed demo docs for onboarding.
 
 ### EP3 - Nudge Button (Priority P1, Status: Complete)
-**Goal**: Give DMs a cooldown-respecting quest bump.  
-**Scope**: DM-only button, bump message, cooldown tracking.  
-**Out of Scope**: Automated player reminders.  
-**Dependencies**: Quest embed builder, Mongo quest fields.  
-**Milestones**: Button visibility -> Cooldown enforcement -> Logging.  
+**Goal**: Give DMs a cooldown-respecting quest bump.
+**Scope**: DM-only button, bump message, cooldown tracking.
+**Out of Scope**: Automated player reminders.
+**Dependencies**: Quest embed builder, Mongo quest fields.
+**Milestones**: Button visibility -> Cooldown enforcement -> Logging.
 **Non-Functional Notes**: Enforce 48-hour cooldown and maintain idempotent telemetry.
 
 #### Story EP3-S1 - DM-Only Nudge Button
@@ -272,11 +272,11 @@ Deliver a guild-friendly Discord companion that streamlines the full quest lifec
   - [x] Update moderation SOP documentation.
 
 ### EP4 - Friendly Player Registration Flow (Deferred)
-**Goal**: Onboard first-time players without friction.  
-**Scope**: Character detection, quick-create modal, auto-continue signup.  
-**Out of Scope**: Full character profile capture in the quick flow.  
-**Dependencies**: Characters repository, quest signup interactions.  
-**Milestones**: Detection -> Modal -> Persist -> Continue signup.  
+**Goal**: Onboard first-time players without friction.
+**Scope**: Character detection, quick-create modal, auto-continue signup.
+**Out of Scope**: Full character profile capture in the quick flow.
+**Dependencies**: Characters repository, quest signup interactions.
+**Milestones**: Detection -> Modal -> Persist -> Continue signup.
 **Non-Functional Notes**: Require minimal fields, ensure owner scoping, handle errors gracefully.
 
 #### Story EP4-S1 - Detect Missing Characters
@@ -324,11 +324,11 @@ Deliver a guild-friendly Discord companion that streamlines the full quest lifec
   - [ ] Update docs describing dropdown behavior.
 
 ### EP5 - Simple UI Improvements (Priority P3, Status: Partially Complete)
-**Goal**: Polish embeds and interactions without altering business logic.  
-**Scope**: Emoji headers, state cues, thread previews, ephemeral confirmations.  
-**Out of Scope**: Discord theming beyond defaults.  
-**Dependencies**: Embed builder, quest lifecycle handlers.  
-**Milestones**: Embed polish -> Role gating -> State cues -> Thread previews.  
+**Goal**: Polish embeds and interactions without altering business logic.
+**Scope**: Emoji headers, state cues, thread previews, ephemeral confirmations.
+**Out of Scope**: Discord theming beyond defaults.
+**Dependencies**: Embed builder, quest lifecycle handlers.
+**Milestones**: Embed polish -> Role gating -> State cues -> Thread previews.
 **Non-Functional Notes**: Avoid regressions on existing commands.
 
 #### Story EP5-S1 - Emoji Section Headers
@@ -376,11 +376,11 @@ Deliver a guild-friendly Discord companion that streamlines the full quest lifec
   - [ ] Handle permission failures gracefully.
 
 ### EP6 - `/lookup` Command (Priority P2, Status: Complete)
-**Goal**: Offer lightweight reference search for staff.  
-**Scope**: Add, get, list, and remove commands with per-guild storage.  
-**Out of Scope**: Full-text fuzzy search beyond basic matching.  
-**Dependencies**: Mongo collection, new bot cog.  
-**Milestones**: Storage schema -> Command set -> Pagination -> Auditing.  
+**Goal**: Offer lightweight reference search for staff.
+**Scope**: Add, get, list, and remove commands with per-guild storage.
+**Out of Scope**: Full-text fuzzy search beyond basic matching.
+**Dependencies**: Mongo collection, new bot cog.
+**Milestones**: Storage schema -> Command set -> Pagination -> Auditing.
 **Non-Functional Notes**: Keep commands role-guarded with reliable responses.
 
 #### Story EP6-S1 - Add Lookup Entries
@@ -401,11 +401,11 @@ Deliver a guild-friendly Discord companion that streamlines the full quest lifec
 - [x] Audit logging records removals.
 
 ### EP7 - External Quest IDs (Priority P1, Status: In Progress)
-**Goal**: Preserve readable quest IDs while migrating entities to the new postal-style format across API, bot, and demo tooling.  
-**Scope**: Postal generator, repository filters, logging alignment, demo seeding, regression tests.  
-**Out of Scope**: Changing entity prefixes or removing legacy numeric parsing.  
-**Dependencies**: `EntityID` model, Mongo repositories, quest and character cogs, demo commands, telemetry logging.  
-**Milestones**: Generator and compatibility -> Persistence rewrite -> Logging cleanup -> Regression suite.  
+**Goal**: Preserve readable quest IDs while migrating entities to the new postal-style format across API, bot, and demo tooling.
+**Scope**: Postal generator, repository filters, logging alignment, demo seeding, regression tests.
+**Out of Scope**: Changing entity prefixes or removing legacy numeric parsing.
+**Dependencies**: `EntityID` model, Mongo repositories, quest and character cogs, demo commands, telemetry logging.
+**Milestones**: Generator and compatibility -> Persistence rewrite -> Logging cleanup -> Regression suite.
 **Non-Functional Notes**: Detect collisions, maintain backward compatibility, avoid Mongo `_id` leakage.
 
 #### Story EP7-S1 - Postal IDs End-to-End

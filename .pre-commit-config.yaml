@@ -1,0 +1,23 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: mixed-line-ending
+
+  - repo: local
+    hooks:
+      - id: ensure-tabs-python
+        name: Ensure leading indentation uses tabs (Python)
+        entry: python3 scripts/ensure_tabs.py
+        language: system
+        types: [python]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.5
+    hooks:
+      - id: ruff
+        name: ruff (lint)
+        args: ["--exit-non-zero-on-fix"]
+        additional_dependencies: []
