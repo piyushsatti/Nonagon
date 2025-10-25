@@ -1146,7 +1146,7 @@ class QuestService:
 
 		if not user.is_player:
 			raise ValueError(
-				"You need the PLAYER role to join quests. Use `/character_add` first."
+				"You need the PLAYER role to join quests. Use `/character create` first."
 			)
 
 		if not user.is_character_owner(character_id):

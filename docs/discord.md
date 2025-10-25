@@ -69,16 +69,26 @@ This page documents the bot’s slash commands, their inputs, permission require
 
 ## Characters
 
-- `character_add`
-  - Inputs: `name: str`, `ddb_link: str`, `character_thread_link: str`, `token_link: str`, `art_link: str`, `description?: str`, `notes?: str`, `tags?: str`
+- `/character create`
+  - Guided DM wizard (modals) collecting name, links, description, notes, tags
   - Permissions: must run in a guild; member only
-  - Output: ephemeral confirmation with new character ID (e.g., `CHARB2F4D9`)
-  - Logging: info log; demo log
-- `character_list`
+  - Output: posts announcement in configured channel, creates a private onboarding thread, DM confirmation with announcement link
+- `/character list`
   - Inputs: none
   - Permissions: must run in a guild; member only
-  - Output: ephemeral embed of the caller’s characters
-  - Logging: none
+  - Output: ephemeral embed listing the caller’s characters and sheet links
+- `/character edit`
+  - Inputs: `character` (ID autocomplete)
+  - Permissions: owner or staff roles
+  - Output: DM wizard to edit fields, updates announcement embed/thread
+- `/character state`
+  - Inputs: `character` (ID autocomplete), `state` (active/retired)
+  - Permissions: owner or staff roles
+  - Output: toggles status and refreshes the public embed
+- `/character show`
+  - Inputs: `character` (ID autocomplete)
+  - Permissions: owner or staff roles
+  - Output: ephemeral embed with announcement link button
 
 ## Stats
 

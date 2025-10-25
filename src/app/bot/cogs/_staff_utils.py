@@ -29,7 +29,7 @@ def is_allowed_staff(bot: commands.Bot, member: discord.Member) -> bool:
 	"""Return True if the member should be treated as Nonagon staff.
 
 	A member is considered staff if they have standard moderation permissions
-	or if they possess any of the roles configured via /guild setup.
+	or if they possess any of the roles saved in the setup settings (legacy `/guild setup`).
 	"""
 	if not isinstance(member, discord.Member):
 		return False

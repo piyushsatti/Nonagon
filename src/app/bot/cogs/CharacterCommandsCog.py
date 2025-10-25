@@ -25,6 +25,10 @@ from app.infra.serialization import from_bson, to_bson
 class CharacterCommandsCog(commands.Cog):
 	"""Slash commands for player character management."""
 
+	character = app_commands.Group(
+		name="character", description="Manage Nonagon character profiles."
+	)
+
 	def __init__(self, bot: commands.Bot):
 		self.bot = bot
 		self._active_dm_sessions: set[int] = set()
@@ -140,6 +144,42 @@ class CharacterCommandsCog(commands.Cog):
 				note = "The onboarding thread could not be found."
 
 		return note
+
+	async def _owned_character_docs(
+		self, guild: discord.Guild, member: discord.Member
+	) -> List[dict]:
+		await self._ensure_guild_cache(guild)
+		guild_entry = self.bot.guild_data[guild.id]
+		db = guild_entry["db"]
+		owner_id = str(UserID.from_body(str(member.id)))
+		cursor = db["characters"].find(
+			{
+				"guild_id": guild.id,
+				"owner_id.value": owner_id,
+			},
+			{
+				"_id": 0,
+				"character_id": 1,
+				"name": 1,
+				"ddb_link": 1,
+				"status": 1,
+				"announcement_channel_id": 1,
+				"announcement_message_id": 1,
+			},
+		)
+		return list(cursor)
+
+	@staticmethod
+	def _normalize_character_id(raw: object) -> str:
+		if isinstance(raw, dict):
+			value = raw.get("value")
+			if value is not None:
+				return str(value)
+			prefix = raw.get("prefix", CharacterID.prefix)
+			number = raw.get("number")
+			if number is not None:
+				return f"{prefix}{number}"
+		return str(raw)
 
 	async def _handle_status_change(
 		self,
@@ -333,8 +373,8 @@ class CharacterCommandsCog(commands.Cog):
 			upsert=True,
 		)
 
-	@app_commands.command(
-		name="character_create",
+	@character.command(
+		name="create",
 		description="Start a DM wizard to create a new character profile.",
 	)
 	@app_commands.guild_only()
@@ -370,7 +410,7 @@ class CharacterCommandsCog(commands.Cog):
 				dm_channel = await member.create_dm()
 			except discord.Forbidden:
 				await interaction.followup.send(
-					"I can't send you direct messages. Enable DMs from server members and run `/character_create` again.",
+					"I can't send you direct messages. Enable DMs from server members and run `/character create` again.",
 					ephemeral=True,
 				)
 				return
@@ -394,7 +434,8 @@ class CharacterCommandsCog(commands.Cog):
 		finally:
 			self._active_dm_sessions.discard(member.id)
 
-	@app_commands.command(name="character_list", description="List your characters.")
+	@character.command(name="list", description="List your characters.")
+	@app_commands.guild_only()
 	async def character_list(self, interaction: discord.Interaction) -> None:
 		if interaction.guild is None:
 			await interaction.response.send_message(
@@ -409,23 +450,11 @@ class CharacterCommandsCog(commands.Cog):
 			)
 			return
 
-		await self._ensure_guild_cache(interaction.guild)
-		guild_entry = self.bot.guild_data[interaction.guild.id]
-		db = guild_entry["db"]
-
-		owner_id = str(UserID.from_body(str(member.id)))
-		cursor = db["characters"].find(
-			{
-				"guild_id": interaction.guild.id,
-				"owner_id.value": owner_id,
-			},
-			{"_id": 0, "character_id": 1, "name": 1, "ddb_link": 1},
-		)
-		characters = list(cursor)
+		characters = await self._owned_character_docs(interaction.guild, member)
 
 		if not characters:
 			await interaction.response.send_message(
-				"You do not have any characters yet. Use `/character_create` to start a new profile.",
+				"You do not have any characters yet. Use `/character create` to start a new profile.",
 				ephemeral=True,
 			)
 			return
@@ -435,26 +464,24 @@ class CharacterCommandsCog(commands.Cog):
 			colour=discord.Color.green(),
 		)
 		for doc in characters:
-			char_id = doc["character_id"]
-			if isinstance(char_id, dict):
-				label = char_id.get("value") or f"{char_id.get('prefix', 'CHAR')}{char_id.get('number', '')}"
-			else:
-				label = str(char_id)
-			status_label = doc.get("status", CharacterRole.ACTIVE.value)
-			status_prefix = "[Retired] " if status_label != CharacterRole.ACTIVE.value else ""
+			char_id = self._normalize_character_id(doc.get("character_id"))
+			status_value = doc.get("status") or CharacterRole.ACTIVE.value
+			status_prefix = "[Retired] " if status_value != CharacterRole.ACTIVE.value else ""
 			embed.add_field(
-				name=f"{status_prefix}{label} — {doc.get('name', 'Unnamed')}",
+				name=f"{status_prefix}{char_id} — {doc.get('name', 'Unnamed')}",
 				value=doc.get("ddb_link", "No sheet link"),
 				inline=False,
 			)
 
 		await interaction.response.send_message(embed=embed, ephemeral=True)
 
-	@app_commands.command(name="character_update", description="Update a character profile via DM.")
-	@app_commands.describe(character_id="Character ID (e.g. CHAR0001)")
+	@character.command(
+		name="edit", description="Update a character profile via DM."
+	)
+	@app_commands.describe(character="Character ID (e.g. CHAR0001)")
 	@app_commands.guild_only()
-	async def character_update(
-		self, interaction: discord.Interaction, character_id: str
+	async def character_edit(
+		self, interaction: discord.Interaction, character: str
 	) -> None:
 		if interaction.guild is None:
 			await interaction.response.send_message(
@@ -469,14 +496,14 @@ class CharacterCommandsCog(commands.Cog):
 			)
 			return
 
-		character = await self._fetch_character(interaction.guild, character_id)
-		if character is None:
+		character_obj = await self._fetch_character(interaction.guild, character)
+		if character_obj is None:
 			await interaction.response.send_message(
-				f"Character `{character_id}` was not found.", ephemeral=True
+				f"Character `{character}` was not found.", ephemeral=True
 			)
 			return
 
-		if not self._can_manage_character(member, character):
+		if not self._can_manage_character(member, character_obj):
 			await interaction.response.send_message(
 				"You do not have permission to modify this character.",
 				ephemeral=True,
@@ -496,7 +523,7 @@ class CharacterCommandsCog(commands.Cog):
 			dm_channel = await member.create_dm()
 		except discord.Forbidden:
 			await interaction.followup.send(
-				"I can't send you direct messages. Enable DMs from server members and run `/character_update` again.",
+				"I can't send you direct messages. Enable DMs from server members and run `/character edit` again.",
 				ephemeral=True,
 			)
 			return
@@ -504,7 +531,7 @@ class CharacterCommandsCog(commands.Cog):
 		self._active_dm_sessions.add(member.id)
 		try:
 			session = CharacterUpdateSession(
-				self, interaction.guild, member, dm_channel, character
+				self, interaction.guild, member, dm_channel, character_obj
 			)
 			result = await session.run()
 		finally:
@@ -528,33 +555,177 @@ class CharacterCommandsCog(commands.Cog):
 		)
 		await interaction.followup.send(response, ephemeral=True)
 
-	@app_commands.command(name="character_retire", description="Mark a character as retired.")
-	@app_commands.describe(character_id="Character ID (e.g. CHAR0001)")
+	@character.command(
+		name="state", description="Set a character's status to active or retired."
+	)
+	@app_commands.describe(
+		character="Character ID (e.g. CHAR0001)",
+		state="Choose the new state for the character.",
+	)
+	@app_commands.choices(
+		state=[
+			app_commands.Choice(name="Active", value="active"),
+			app_commands.Choice(name="Retired", value="retired"),
+		]
+	)
 	@app_commands.guild_only()
-	async def character_retire(
-		self, interaction: discord.Interaction, character_id: str
+	async def character_state(
+		self,
+		interaction: discord.Interaction,
+		character: str,
+		state: app_commands.Choice[str],
 	) -> None:
+		target_status = (
+			CharacterRole.ACTIVE if state.value == "active" else CharacterRole.INACTIVE
+		)
+		success_message = (
+			"Character `{name}` has been restored to active status."
+			if target_status is CharacterRole.ACTIVE
+			else "Character `{name}` has been retired."
+		)
+		already_message = (
+			"Character `{name}` is already active."
+			if target_status is CharacterRole.ACTIVE
+			else "Character `{name}` is already retired."
+		)
 		await self._handle_status_change(
 			interaction,
-			character_id,
-			target_status=CharacterRole.INACTIVE,
-			success_message="Character `{name}` has been retired.",
-			already_message="Character `{name}` is already retired.",
+			character,
+			target_status=target_status,
+			success_message=success_message,
+			already_message=already_message,
 		)
 
-	@app_commands.command(name="character_unretire", description="Mark a character as active.")
-	@app_commands.describe(character_id="Character ID (e.g. CHAR0001)")
+	@character.command(
+		name="show",
+		description="Get the announcement link for one of your characters.",
+	)
+	@app_commands.describe(character="Character ID (e.g. CHAR0001)")
 	@app_commands.guild_only()
-	async def character_unretire(
-		self, interaction: discord.Interaction, character_id: str
+	async def character_show(
+		self, interaction: discord.Interaction, character: str
 	) -> None:
-		await self._handle_status_change(
-			interaction,
-			character_id,
-			target_status=CharacterRole.ACTIVE,
-			success_message="Character `{name}` has been restored to active status.",
-			already_message="Character `{name}` is already active.",
+		if interaction.guild is None:
+			await interaction.response.send_message(
+				"This command can only be used inside a guild.", ephemeral=True
+			)
+			return
+
+		member = interaction.user
+		if not isinstance(member, discord.Member):
+			await interaction.response.send_message(
+				"Only guild members can inspect characters.", ephemeral=True
+			)
+			return
+
+		character_obj = await self._fetch_character(interaction.guild, character)
+		if character_obj is None:
+			await interaction.response.send_message(
+				f"Character `{character}` was not found.", ephemeral=True
+			)
+			return
+
+		if not self._can_manage_character(member, character_obj):
+			await interaction.response.send_message(
+				"You do not have permission to view this character's announcement.",
+				ephemeral=True,
+			)
+			return
+
+		channel_id = character_obj.announcement_channel_id
+		message_id = character_obj.announcement_message_id
+		if not channel_id or not message_id:
+			await interaction.response.send_message(
+				"No announcement link is stored for this character.", ephemeral=True
+			)
+			return
+
+		channel = interaction.guild.get_channel(channel_id)
+		if channel is None:
+			try:
+				channel = await interaction.guild.fetch_channel(channel_id)
+			except (discord.HTTPException, discord.Forbidden, discord.NotFound):
+				channel = None
+		if not isinstance(channel, discord.TextChannel):
+			await interaction.response.send_message(
+				"The stored announcement channel could not be accessed.", ephemeral=True
+			)
+			return
+
+		jump_url: str = f"https://discord.com/channels/{interaction.guild.id}/{channel.id}/{message_id}"
+		try:
+			message = await channel.fetch_message(message_id)
+			jump_url = message.jump_url
+		except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+			pass
+
+		embed = discord.Embed(
+			title=f"{character_obj.name}",
+			description=f"Character ID: `{character_obj.character_id}`",
+			colour=discord.Colour.blurple(),
+			timestamp=datetime.now(timezone.utc),
 		)
+		embed.add_field(
+			name="Status",
+			value=self._status_label(character_obj.status),
+			inline=True,
+		)
+		embed.add_field(
+			name="Channel",
+			value=channel.mention,
+			inline=True,
+		)
+		if character_obj.ddb_link:
+			embed.add_field(name="Sheet", value=character_obj.ddb_link, inline=False)
+
+		view = CharacterLinkView(jump_url)
+		await interaction.response.send_message(
+			"Here's your character announcement link:",
+			ephemeral=True,
+			embed=embed,
+			view=view,
+		)
+
+	async def _character_autocomplete(
+		self, interaction: discord.Interaction, current: str
+	) -> List[app_commands.Choice[str]]:
+		if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+			return []
+		try:
+			docs = await self._owned_character_docs(interaction.guild, interaction.user)
+		except Exception:
+			return []
+
+		current_lower = current.lower()
+		choices: List[app_commands.Choice[str]] = []
+		for doc in docs:
+			char_id = self._normalize_character_id(doc.get("character_id"))
+			name = doc.get("name", "Unnamed")
+			display = f"{name} ({char_id})"
+			if current_lower and current_lower not in display.lower():
+				continue
+			choices.append(app_commands.Choice(name=display[:100], value=char_id))
+			if len(choices) >= 25:
+				break
+		return choices
+
+	@character_edit.autocomplete("character")
+	async def character_edit_autocomplete(
+		self, interaction: discord.Interaction, current: str
+	) -> List[app_commands.Choice[str]]:
+		return await self._character_autocomplete(interaction, current)
+
+	@character_state.autocomplete("character")
+	async def character_state_autocomplete(
+		self, interaction: discord.Interaction, current: str
+	) -> List[app_commands.Choice[str]]:
+		return await self._character_autocomplete(interaction, current)
+
+	@character_show.autocomplete("character")
+	async def character_show_autocomplete(
+		self, interaction: discord.Interaction, current: str
+	) -> List[app_commands.Choice[str]]:
+		return await self._character_autocomplete(interaction, current)
 
 
 class CharacterSessionBase:
@@ -725,6 +896,14 @@ class CharacterUpdateResult:
 	error: Optional[str] = None
 
 
+class CharacterLinkView(discord.ui.View):
+	def __init__(self, url: str):
+		super().__init__(timeout=120)
+		self.add_item(
+			discord.ui.Button(label="Open Announcement", url=url)
+		)
+
+
 class CharacterConfirmView(discord.ui.View):
 	def __init__(self, requester: discord.Member, *, timeout: int = 180):
 		super().__init__(timeout=timeout)
@@ -844,11 +1023,11 @@ class CharacterCreationSession(CharacterSessionBase):
 			return CharacterCreationResult(False, error="Character creation cancelled.")
 		except SessionTimeout:
 			await self._safe_send(
-				"Timed out waiting for a response. Run `/character_create` again when you're ready."
+				"Timed out waiting for a response. Run `/character create` again when you're ready."
 			)
 			return CharacterCreationResult(
 				False,
-				error="Timed out waiting for a response. Run `/character_create` again when you're ready.",
+				error="Timed out waiting for a response. Run `/character create` again when you're ready.",
 			)
 		except SessionMessagingError as exc:
 			return CharacterCreationResult(False, error=exc.message)
@@ -888,7 +1067,7 @@ class CharacterCreationSession(CharacterSessionBase):
 				)
 			return CharacterCreationResult(
 				False,
-				error="Confirmation timed out. Run `/character_create` again when you're ready.",
+				error="Confirmation timed out. Run `/character create` again when you're ready.",
 			)
 
 		try:
@@ -1147,11 +1326,11 @@ class CharacterUpdateSession(CharacterSessionBase):
 			return CharacterUpdateResult(success=False, error="Character update cancelled.")
 		except SessionTimeout:
 			await self._safe_send(
-				"Timed out waiting for a response. Run `/character_update` again when you're ready."
+				"Timed out waiting for a response. Run `/character edit` again when you're ready."
 			)
 			return CharacterUpdateResult(
 				success=False,
-				error="Timed out waiting for a response. Run `/character_update` again when you're ready.",
+				error="Timed out waiting for a response. Run `/character edit` again when you're ready.",
 			)
 		except SessionMessagingError as exc:
 			return CharacterUpdateResult(success=False, error=exc.message)
@@ -1185,7 +1364,7 @@ class CharacterUpdateSession(CharacterSessionBase):
 				return CharacterUpdateResult(success=False, error="Character update cancelled.")
 			return CharacterUpdateResult(
 				success=False,
-				error="Confirmation timed out. Run `/character_update` again when you're ready.",
+				error="Confirmation timed out. Run `/character edit` again when you're ready.",
 			)
 
 		return await self._apply_updates(tags)
