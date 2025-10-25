@@ -139,15 +139,6 @@ class SetupCommandsCog(commands.Cog):
 			inline=False,
 		)
 		embed.add_field(
-			name="Quest forge channel",
-			value=self._format_channel(
-				guild,
-				self._coerce_int(settings.get("quest_forge_channel_id")),
-				settings.get("quest_forge_channel_name"),
-			),
-			inline=False,
-		)
-		embed.add_field(
 			name="Quest ping role",
 			value=self._format_role(
 				guild,
@@ -239,7 +230,7 @@ class SetupCommandsCog(commands.Cog):
 		)
 		embed.add_field(
 			name="/setup quest",
-			value="Set quest announcement & forge channels, plus optional ping role.",
+			value="Set quest announcement channel and optional ping role.",
 			inline=False,
 		)
 		embed.add_field(
@@ -426,10 +417,9 @@ class SetupCommandsCog(commands.Cog):
 
 	@setup.command(
 		name="quest",
-		description="Configure quest forge & announcement channels, plus optional ping role.",
+		description="Configure quest announcement channel and optional ping role.",
 	)
 	@app_commands.describe(
-		forge_channel="Channel where quest drafts/forge workflows run.",
 		announcement_channel="Channel where quest announcements are posted.",
 		pings="Role to mention when announcing quests (optional).",
 	)
@@ -438,7 +428,6 @@ class SetupCommandsCog(commands.Cog):
 	async def setup_quest(
 		self,
 		interaction: discord.Interaction,
-		forge_channel: discord.TextChannel,
 		announcement_channel: discord.TextChannel,
 		pings: Optional[discord.Role] = None,
 	) -> None:
@@ -450,23 +439,15 @@ class SetupCommandsCog(commands.Cog):
 
 		await interaction.response.defer(ephemeral=True, thinking=True)
 
-		for error, channel in (
-			(self._ensure_bot_permissions(forge_channel, require_send=True), forge_channel),
-			(
-				self._ensure_bot_permissions(announcement_channel, require_send=True),
-				announcement_channel,
-			),
-		):
-			if error:
-				await interaction.followup.send(error, ephemeral=True)
-				return
+		error = self._ensure_bot_permissions(announcement_channel, require_send=True)
+		if error:
+			await interaction.followup.send(error, ephemeral=True)
+			return
 
 		config = self._save_settings(
 			interaction.guild,
 			interaction.user.id,
 			{
-				"quest_forge_channel_id": forge_channel.id,
-				"quest_forge_channel_name": forge_channel.name,
 				"quest_commands_channel_id": announcement_channel.id,
 				"quest_commands_channel_name": announcement_channel.name,
 				"quest_ping_role_id": pings.id if pings else None,
@@ -478,11 +459,6 @@ class SetupCommandsCog(commands.Cog):
 			title="Quest settings updated",
 			colour=discord.Colour.blurple(),
 			timestamp=config.get("updated_at"),
-		)
-		embed.add_field(
-			name="Forge channel",
-			value=forge_channel.mention,
-			inline=False,
 		)
 		embed.add_field(
 			name="Announcement channel",

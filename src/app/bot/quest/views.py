@@ -1,239 +1,23 @@
 from __future__ import annotations
 
-import logging
 import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, List, Optional
 
 import discord
 
-from app.bot.quest.models import ForgePreviewState, parse_forge_draft
 from app.bot.utils.log_stream import send_demo_log
 from app.domain.models.EntityIDModel import CharacterID, QuestID, UserID
 from app.domain.models.QuestModel import PlayerSignUp, PlayerStatus, Quest
 
 if TYPE_CHECKING:
-	from app.bot.quest.service import QuestService
+	from app.bot.cogs.QuestCommandsCog import QuestCommandsCog
 
 NO_PENDING_REQUESTS_LABEL = "No pending requests"
 
 
-class ForgeDraftView(discord.ui.View):
-	def __init__(self, service: "QuestService", message: discord.Message) -> None:
-		super().__init__(timeout=None)
-		self.service = service
-		self.guild_id = message.guild.id if message.guild else 0
-		self.channel_id = message.channel.id
-		self.message_id = message.id
-		self.author_id = message.author.id
-
-	async def _ensure_referee(self, interaction: discord.Interaction) -> bool:
-		if interaction.guild is None:
-			await interaction.response.send_message(
-				"Forge actions are only available inside a guild.", ephemeral=True
-			)
-			return False
-
-		if interaction.user.id != self.author_id:
-			await interaction.response.send_message(
-				"Only the draft author can manage this quest.", ephemeral=True
-			)
-			return False
-
-		if not isinstance(interaction.user, discord.Member):
-			await interaction.response.send_message(
-				"Only guild members can manage forge drafts.", ephemeral=True
-			)
-			return False
-
-		try:
-			user = await self.service.get_cached_user(interaction.user)
-		except Exception:
-			await interaction.response.send_message(
-				"Unable to resolve your profile; please try again shortly.",
-				ephemeral=True,
-			)
-			return False
-
-		if not user.is_referee:
-			await interaction.response.send_message(
-				"You need the REFEREE role to manage quests.", ephemeral=True
-			)
-			return False
-
-		return True
-
-	async def _resolve_message(self, interaction: discord.Interaction) -> Optional[discord.Message]:
-		channel = interaction.guild.get_channel(self.channel_id) if interaction.guild else None
-		if channel is None and interaction.guild is not None:
-			try:
-				channel = await interaction.guild.fetch_channel(self.channel_id)
-			except Exception:
-				return None
-
-		if channel is None:
-			return None
-
-		try:
-			return await channel.fetch_message(self.message_id)
-		except Exception:
-			return None
-
-	def _preview_state(self) -> ForgePreviewState:
-		return self.service.forge_preview_state(self.guild_id, self.message_id)
-
-	async def _resolve_thread(
-		self,
-		interaction: discord.Interaction,
-		message: discord.Message,
-		state: ForgePreviewState,
-	) -> Optional[discord.Thread]:
-		guild = interaction.guild
-		if guild is None:
-			return None
-
-		thread: Optional[discord.Thread] = None
-		if state.thread_id:
-			thread = guild.get_thread(state.thread_id)
-			if thread is None:
-				try:
-					fetched = await guild.fetch_channel(state.thread_id)
-				except Exception:
-					fetched = None
-				if isinstance(fetched, discord.Thread):
-					thread = fetched
-
-		if thread is not None:
-			return thread
-
-		try:
-			name = f"Quest Preview {interaction.user.display_name}"[:90]
-			thread = await message.create_thread(name=name, auto_archive_duration=60)
-		except Exception:
-			return None
-
-		state.thread_id = thread.id
-		return thread
-
-	async def _send_preview_to_thread(
-		self,
-		thread: discord.Thread,
-		state: ForgePreviewState,
-		embed: discord.Embed,
-	) -> Optional[str]:
-		try:
-			if state.preview_message_id:
-				preview_message = await thread.fetch_message(state.preview_message_id)
-				await preview_message.edit(embed=embed, content=None)
-			else:
-				preview_message = await thread.send(embed=embed)
-				state.preview_message_id = preview_message.id
-		except Exception:
-			try:
-				preview_message = await thread.send(embed=embed)
-				state.preview_message_id = preview_message.id
-			except Exception:
-				return None
-
-		state.last_rendered_at = datetime.now(timezone.utc)
-		return thread.jump_url
-
-	@discord.ui.button(label="Preview", style=discord.ButtonStyle.primary)
-	async def preview_button(
-		self, interaction: discord.Interaction, button: discord.ui.Button
-	) -> None:
-		if not await self._ensure_referee(interaction):
-			return
-
-		message = await self._resolve_message(interaction)
-		if message is None:
-			await interaction.response.send_message(
-				"Unable to locate the draft message.", ephemeral=True
-			)
-			return
-
-		await interaction.response.defer(ephemeral=True, thinking=True)
-
-		draft = parse_forge_draft(message.content)
-		quest_id = f"DRAFT{self.message_id}"
-		embed = self.service.build_draft_embed(
-			draft,
-			quest_id=quest_id,
-			referee_display=interaction.user.mention,
-		)
-
-		state = self._preview_state()
-		thread = await self._resolve_thread(interaction, message, state)
-		preview_link = None
-		if thread is not None:
-			preview_link = await self._send_preview_to_thread(thread, state, embed)
-
-		if preview_link:
-			await interaction.followup.send(
-				f"Preview updated in [thread]({preview_link}).", ephemeral=True
-			)
-		else:
-			await interaction.followup.send(embed=embed, ephemeral=True)
-
-	@discord.ui.button(label="Approve", style=discord.ButtonStyle.success)
-	async def approve_button(
-		self, interaction: discord.Interaction, button: discord.ui.Button
-	) -> None:
-		if not await self._ensure_referee(interaction):
-			return
-
-		await interaction.response.defer(ephemeral=True, thinking=True)
-		message = await self._resolve_message(interaction)
-		if message is None or interaction.guild is None:
-			await interaction.followup.send(
-				"Unable to locate the draft message for approval.", ephemeral=True
-			)
-			return
-
-		draft = parse_forge_draft(message.content)
-
-		try:
-			result = await self.service.approve_forge_draft(
-				interaction,
-				draft=draft,
-				author=interaction.user,
-				source_message=message,
-			)
-		except Exception as exc:
-			logging.exception("Forge approve failed: %s", exc)
-			await interaction.followup.send(
-				"Quest approval failed; please try again later.", ephemeral=True
-			)
-			return
-
-		if result is None:
-			await interaction.followup.send(
-				"Quest approval aborted; please review the draft details.",
-				ephemeral=True,
-			)
-			return
-
-		await interaction.followup.send(result, ephemeral=True)
-
-	@discord.ui.button(label="Discard", style=discord.ButtonStyle.danger)
-	async def discard_button(
-		self, interaction: discord.Interaction, button: discord.ui.Button
-	) -> None:
-		if not await self._ensure_referee(interaction):
-			return
-
-		await interaction.response.defer(ephemeral=True, thinking=True)
-		message = await self._resolve_message(interaction)
-		if message is None:
-			await interaction.followup.send("Draft already removed.", ephemeral=True)
-			return
-
-		await self.service.discard_forge_draft(interaction, source_message=message)
-		await interaction.followup.send("Draft discarded.", ephemeral=True)
-
-
 class JoinQuestModal(discord.ui.Modal):
-	def __init__(self, service: "QuestService", quest_id: str) -> None:
+	def __init__(self, service: "QuestCommandsCog", quest_id: str) -> None:
 		super().__init__(title=f"Join {quest_id}")
 		self.service = service
 		self.quest_id = quest_id
@@ -260,7 +44,7 @@ class JoinQuestModal(discord.ui.Modal):
 
 
 class QuestSignupView(discord.ui.View):
-	def __init__(self, service: "QuestService", quest_id: Optional[str] = None) -> None:
+	def __init__(self, service: "QuestCommandsCog", quest_id: Optional[str] = None) -> None:
 		super().__init__(timeout=None)
 		self.service = service
 		self.quest_id = quest_id
@@ -299,7 +83,7 @@ class QuestSignupView(discord.ui.View):
 
 		class _EphemeralJoin(discord.ui.View):
 			def __init__(
-				self, service: "QuestService", quest_id: str, member: discord.Member
+				self, service: "QuestCommandsCog", quest_id: str, member: discord.Member
 			):
 				super().__init__(timeout=60)
 				self.add_item(CharacterSelect(service, quest_id, member))
@@ -427,7 +211,7 @@ class QuestSignupView(discord.ui.View):
 
 
 class CharacterSelect(discord.ui.Select):
-	def __init__(self, service: "QuestService", quest_id: str, member: discord.Member):
+	def __init__(self, service: "QuestCommandsCog", quest_id: str, member: discord.Member):
 		self.service = service
 		self.quest_id = quest_id
 		self.member = member
@@ -491,7 +275,7 @@ class SignupDecisionView(discord.ui.View):
 	def __init__(
 		self,
 		*,
-		service: "QuestService",
+		service: "QuestCommandsCog",
 		guild: discord.Guild,
 		quest: Quest,
 		reviewer: discord.Member,

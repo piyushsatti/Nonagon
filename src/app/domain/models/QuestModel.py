@@ -27,8 +27,8 @@ class Quest:
 	quest_id: QuestID
 	guild_id: int
 	referee_id: UserID  # Referee responsible
-	channel_id: str
-	message_id: str
+	channel_id: str | None = None
+	message_id: str | None = None
 
 	# Metadata
 	raw: str  # raw markdown input
@@ -43,7 +43,8 @@ class Quest:
 	linked_summaries: List[SummaryID] = field(default_factory=list)
 
 	# Lifecycle
-	status: QuestStatus = QuestStatus.ANNOUNCED
+	status: QuestStatus = QuestStatus.DRAFT
+	announce_at: datetime | None = None
 	started_at: datetime = None
 	ended_at: datetime = None
 	signups: List[PlayerSignUp] = field(default_factory=list)

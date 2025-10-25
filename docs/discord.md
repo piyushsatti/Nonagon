@@ -29,17 +29,41 @@ This page documents the bot’s slash commands, their inputs, permission require
 > **ID format:** All quest, character, and summary identifiers use postal-style values such as `QUESH3X1T7` or `CHARB2F4D9`. Slash commands expect the full ID string (including prefix).
 > Demo logs for quest actions surface these postal IDs directly so moderators can cross-check announcements.
 
-- `createquest`
-  - Inputs: `title: str`, `start_time_epoch: int>=0`, `duration_hours: int[1..48]`, `description?: str`, `image_url?: str`
-  - Permissions: must run in a guild; user must be REFEREE
-  - Output: quest announcement embed in channel; ephemeral confirmation
-  - Logging: info log; demo log entry
-- `joinquest`
+- `/quest create`
+  - Flow: DM wizard prompts for title, description, start time, duration, and optional cover image. Preview embed updates after each step.
+  - Permissions: must run in a guild; caller must be REFEREE or allowed staff.
+  - Output: quest stored as `DRAFT`, DM summary with preview and `/quest announce` reminder, ephemeral confirmation.
+  - Logging: demo log once the quest is announced.
+- `/quest edit`
+  - Flow: DM wizard updates existing quest fields with live preview after each change.
+  - Permissions: referee or allowed staff.
+  - Output: quest updated; existing announcement embed refreshed if present; DM summary sent.
+  - Logging: warnings on failures; demo log for downstream actions (accept/decline, etc.).
+- `/quest announce`
+  - Inputs: `quest: str` (Quest ID), `time?: str` (ISO string, `<t:epoch>`, or `YYYY-MM-DD HH:MM` in UTC)
+  - Permissions: referee or allowed staff.
+  - Output: immediate announcement (pings configured quest role) or scheduled via `announce_at`.
+  - Logging: demo log; warnings on configuration errors.
+- `/quest nudge`
+  - Inputs: `quest: str`
+  - Permissions: quest referee; enforces 48h cooldown.
+  - Output: posts “Quest Nudge” embed in announcement channel, optionally mentions quest ping role.
+  - Logging: demo log; cooldown guidance returned ephemerally.
+- `/quest cancel`
+  - Inputs: `quest: str`
+  - Permissions: referee or allowed staff.
+  - Output: quest marked `CANCELLED`, signup view removed, announcement embed updated.
+  - Logging: demo log; errors logged.
+- `/quest players`
+  - Inputs: `quest: str`
+  - Permissions: referee or allowed staff.
+  - Output: ephemeral embed listing selected and pending players with mentions + character IDs (quest must be `COMPLETED`).
+- `/joinquest`
   - Inputs: `quest_id: str` (autocomplete), `character_id: str` (autocomplete)
   - Permissions: must run in a guild; user must be PLAYER and own the character
   - Output: ephemeral confirmation; channel message notes the join
   - Logging: demo log; debug logs on fetch failures
-- `leavequest`
+- `/leavequest`
   - Inputs: `quest_id: str`
   - Permissions: must run in a guild; user must be signed up
   - Output: ephemeral confirmation; channel message notes the leave

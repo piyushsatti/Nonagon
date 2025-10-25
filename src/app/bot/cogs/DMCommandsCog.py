@@ -61,8 +61,8 @@ class DMCommandsCog(commands.Cog):
 		message = (
 			"Your demo profile is active!\n\n"
 			"Available commands:\n"
-		"• `/character create` – create a character\n"
-			"• `/createquest` – schedule a quest (referees)\n"
+			"• `/character create` – create a character\n"
+			"• `/quest create` – start a quest draft (referees)\n"
 			"• `/stats` – view engagement metrics\n"
 			"• `/nudges enable|disable` – control reminders\n"
 		)
