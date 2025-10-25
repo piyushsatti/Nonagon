@@ -1242,25 +1242,28 @@ class CharacterUpdateSession(CharacterSessionBase):
 		thread_name: str,
 	) -> Optional[discord.Thread]:
 		try:
-			thread = await announcement.create_thread(
+			thread = await channel.create_thread(
 				name=thread_name,
 				type=discord.ChannelType.private_thread,
 				auto_archive_duration=channel.default_auto_archive_duration or 1440,
 				reason="Character onboarding",
 			)
-		except discord.Forbidden:
-			return None
-		except discord.HTTPException as exc:
-			# Fallback if private threads are not permitted in this channel
-			if getattr(exc, "code", None) in {50013, 50024, 50035}:
-				return None
-			logging.debug("Failed to create private thread for character: %s", exc)
+		except (discord.Forbidden, discord.HTTPException):
 			return None
 
 		try:
 			await thread.add_user(self.member)
-		except discord.HTTPException as exc:
-			logging.debug("Failed to add member to character thread: %s", exc)
+		except discord.HTTPException:
+			pass
+
+		try:
+			await thread.send(
+				f"Onboarding thread for {self.member.mention}. "
+				f"Announcement: {announcement.jump_url}"
+			)
+		except discord.HTTPException:
+			pass
+
 		return thread
 
 	def _resolve_character_channel(
@@ -1271,7 +1274,7 @@ class CharacterUpdateSession(CharacterSessionBase):
 		if channel_id is None:
 			return (
 				None,
-				"No character commands channel is configured. Ask an admin to run `/guild setup` and try again.",
+				"No character commands channel is configured. Ask an admin to run `/setup character` and try again.",
 			)
 
 		try:
@@ -1282,7 +1285,7 @@ class CharacterUpdateSession(CharacterSessionBase):
 		if not isinstance(candidate, discord.TextChannel):
 			return (
 				None,
-				"The configured character channel is missing or not a text channel. Ask an admin to refresh `/guild setup`.",
+				"The configured character channel is missing or not a text channel. Ask an admin to rerun `/setup character`.",
 			)
 
 		me = self.guild.me

@@ -163,6 +163,16 @@ class QuestCommandsCog(commands.Cog):
 		if channel_id is None:
 			return False
 
+		guild = getattr(channel, "guild", None)
+		if isinstance(guild, discord.Guild):
+			settings = guild_settings_store.fetch_settings(guild.id) or {}
+			stored_id = settings.get("quest_forge_channel_id")
+			try:
+				if stored_id is not None and int(stored_id) == int(channel_id):
+					return True
+			except (TypeError, ValueError):
+				pass
+
 		if FORGE_CHANNEL_IDS:
 			return int(channel_id) in FORGE_CHANNEL_IDS
 
@@ -1517,6 +1527,13 @@ class QuestCommandsCog(commands.Cog):
 		placement_note: Optional[str] = None
 		settings = guild_settings_store.fetch_settings(interaction.guild.id) or {}
 		target_channel_id = settings.get("quest_commands_channel_id")
+		ping_role: Optional[discord.Role] = None
+		ping_role_id = settings.get("quest_ping_role_id")
+		if ping_role_id is not None:
+			try:
+				ping_role = interaction.guild.get_role(int(ping_role_id))
+			except (TypeError, ValueError):
+				ping_role = None
 		if target_channel_id is not None:
 			try:
 				candidate = interaction.guild.get_channel(int(target_channel_id))
@@ -1536,8 +1553,13 @@ class QuestCommandsCog(commands.Cog):
 					f"Used {interaction.channel.mention} instead."
 				)
 
+		content_mentions = [member.mention]
+		if ping_role is not None:
+			content_mentions.append(ping_role.mention)
+		content = " ".join(content_mentions) + " scheduled a quest!"
+
 		announcement = await target_channel.send(
-			content=f"{member.mention} scheduled a quest!",
+			content=content,
 			embed=embed,
 			view=QuestSignupView(self, str(quest_id)),
 		)

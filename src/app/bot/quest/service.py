@@ -21,6 +21,7 @@ from app.bot.quest.models import (
 	ForgePreviewState,
 )
 from app.bot.utils.log_stream import send_demo_log
+from app.bot.services import guild_settings_store
 from app.bot.utils.quest_embeds import (
 	QuestEmbedData,
 	QuestEmbedRoster,
@@ -53,6 +54,16 @@ class QuestService:
 		channel_id = getattr(channel, "id", None)
 		if channel_id is None:
 			return False
+
+		guild = getattr(channel, "guild", None)
+		if isinstance(guild, discord.Guild):
+			settings = guild_settings_store.fetch_settings(guild.id) or {}
+			stored_id = settings.get("quest_forge_channel_id")
+			try:
+				if stored_id is not None and int(stored_id) == int(channel_id):
+					return True
+			except (TypeError, ValueError):
+				pass
 
 		if FORGE_CHANNEL_IDS:
 			return int(channel_id) in FORGE_CHANNEL_IDS
