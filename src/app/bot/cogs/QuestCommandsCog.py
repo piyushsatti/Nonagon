@@ -3,11 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Type, Literal
 
 import aiohttp
 import discord
@@ -270,22 +269,12 @@ class QuestCommandsCog(commands.Cog):
 		text = (value or "").strip()
 		if not text:
 			return None
-		match = re.search(r"<t:(\d+)", text)
-		if match:
-			return datetime.fromtimestamp(int(match.group(1)), tz=timezone.utc)
-		for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
+		if text.isdigit():
 			try:
-				dt = datetime.strptime(text, fmt)
-				return dt.replace(tzinfo=timezone.utc)
-			except ValueError:
-				continue
-		try:
-			dt = datetime.fromisoformat(text.replace("UTC", "+00:00"))
-			if dt.tzinfo is None:
-				dt = dt.replace(tzinfo=timezone.utc)
-			return dt.astimezone(timezone.utc)
-		except ValueError:
-			return None
+				return datetime.fromtimestamp(int(text), tz=timezone.utc)
+			except (OverflowError, ValueError):
+				return None
+		return None
 
 	async def _sync_quest_announcement(
 		self,
@@ -1603,7 +1592,7 @@ class QuestCommandsCog(commands.Cog):
 			parsed_time = self._parse_datetime_input(time)
 			if parsed_time is None:
 				await interaction.followup.send(
-					"Could not parse the provided time. Use `YYYY-MM-DD HH:MM` (UTC) or `<t:epoch>`.",
+					"Could not parse the provided time. Enter epoch seconds (UTC).",
 					ephemeral=True,
 				)
 				return
@@ -2352,40 +2341,66 @@ class QuestSessionBase:
 		quest: Quest,
 		*,
 		header: Optional[str] = None,
+		view: Optional[discord.ui.View] = None,
 	) -> None:
 		embed = self._build_preview_embed(quest)
 		content = header or "**Current quest preview:**"
 		if self._preview_message is None:
-			self._preview_message = await self._safe_send(content, embed=embed)
+			self._preview_message = await self._safe_send(
+				content,
+				embed=embed,
+				view=view,
+			)
 			return
 		try:
-			await self._preview_message.edit(content=content, embed=embed)
+			await self._preview_message.edit(
+				content=content,
+				embed=embed,
+				view=view,
+			)
 		except discord.HTTPException:
-			self._preview_message = await self._safe_send(content, embed=embed)
+			self._preview_message = await self._safe_send(
+				content,
+				embed=embed,
+				view=view,
+			)
 
 	async def send_completion_summary(self, quest: Quest, note: str) -> None:
 		await self._safe_send(note, embed=self._build_preview_embed(quest))
+
+	async def _flash_message(
+		self,
+		interaction: discord.Interaction,
+		message: str,
+		*,
+		delay: float = 5.0,
+	) -> None:
+		try:
+			if interaction.response.is_done():
+				await interaction.followup.send(message, ephemeral=True)
+			else:
+				await interaction.response.send_message(message, ephemeral=True)
+		except Exception:
+			with suppress(Exception):
+				await self._safe_send(message)
+			return
+		try:
+			await asyncio.sleep(delay)
+			if interaction.followup:
+				await interaction.delete_original_response()
+		except Exception:
+			pass
 
 	def _parse_datetime(self, value: str) -> Optional[datetime]:
 		text = value.strip()
 		if not text:
 			return None
-		matcher = re.search(r"<t:(\d+)", text)
-		if matcher:
-			return datetime.fromtimestamp(int(matcher.group(1)), tz=timezone.utc)
-		for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
+		if text.isdigit():
 			try:
-				dt = datetime.strptime(text, fmt)
-				return dt.replace(tzinfo=timezone.utc)
-			except ValueError:
-				continue
-		try:
-			dt = datetime.fromisoformat(text.replace("UTC", "+00:00"))
-			if dt.tzinfo is None:
-				dt = dt.replace(tzinfo=timezone.utc)
-			return dt.astimezone(timezone.utc)
-		except ValueError:
-			return None
+				return datetime.fromtimestamp(int(text), tz=timezone.utc)
+			except (OverflowError, ValueError):
+				return None
+		return None
 
 	def _parse_duration(self, value: str) -> Optional[timedelta]:
 		text = value.strip()
@@ -2398,6 +2413,317 @@ class QuestSessionBase:
 		if hours_float <= 0:
 			return None
 		return timedelta(hours=hours_float)
+
+
+class QuestWizardContext:
+	def __init__(
+		self,
+		session: "QuestSessionBase",
+		quest: Quest,
+		mode: Literal["create", "update"],
+		timeout: int = 600,
+	) -> None:
+		self.session = session
+		self.quest = quest
+		self.mode = mode
+		self.timeout = timeout
+		loop = asyncio.get_running_loop()
+		self.future: asyncio.Future = loop.create_future()
+
+	def resolve(self, result: Any) -> None:
+		if not self.future.done():
+			self.future.set_result(result)
+
+
+class QuestWizardView(discord.ui.View):
+	def __init__(self, context: QuestWizardContext) -> None:
+		super().__init__(timeout=context.timeout)
+		self._all_items: list[discord.ui.Item] = list(self.children)
+		self.context = context
+		if context.mode == "create":
+			self.submit_button.label = "Save Draft"
+		else:
+			self.submit_button.label = "Save Changes"
+
+	def _build_result(self, success: bool, error: Optional[str] = None) -> Any:
+		if self.context.mode == "create":
+			return QuestCreationResult(
+				success,
+				quest=self.context.quest if success else None,
+				error=error,
+			)
+		return QuestUpdateResult(
+			success,
+			quest=self.context.quest if success else None,
+			error=error,
+		)
+
+	async def interaction_check(self, interaction: discord.Interaction) -> bool:
+		if interaction.user.id != self.context.session.member.id:
+			await interaction.response.send_message(
+				"This wizard is controlled by someone else.", ephemeral=True
+			)
+			return False
+		return True
+
+	async def on_timeout(self) -> None:
+		result = self._build_result(False, "Wizard timed out. Start again when ready.")
+		self.context.resolve(result)
+		try:
+			await self.context.session._update_preview(self.context.quest, view=None)
+		except Exception:
+			pass
+		self.stop()
+
+	@discord.ui.button(label="Title", style=discord.ButtonStyle.primary)
+	async def edit_title(  # type: ignore[override]
+		self, interaction: discord.Interaction, button: discord.ui.Button
+	) -> None:
+		try:
+			await interaction.response.send_modal(QuestTitleModal(self.context, self))
+		except discord.NotFound:
+			return
+
+	@discord.ui.button(label="Description", style=discord.ButtonStyle.primary)
+	async def edit_description(  # type: ignore[override]
+		self, interaction: discord.Interaction, button: discord.ui.Button
+	) -> None:
+		try:
+			await interaction.response.send_modal(
+				QuestDescriptionModal(self.context, self)
+			)
+		except discord.NotFound:
+			return
+
+	@discord.ui.button(label="Start Time", style=discord.ButtonStyle.secondary)
+	async def edit_start_time(  # type: ignore[override]
+		self, interaction: discord.Interaction, button: discord.ui.Button
+	) -> None:
+		try:
+			await interaction.response.send_modal(QuestStartModal(self.context, self))
+		except discord.NotFound:
+			return
+
+	@discord.ui.button(label="Duration", style=discord.ButtonStyle.secondary)
+	async def edit_duration(  # type: ignore[override]
+		self, interaction: discord.Interaction, button: discord.ui.Button
+	) -> None:
+		try:
+			await interaction.response.send_modal(QuestDurationModal(self.context, self))
+		except discord.NotFound:
+			return
+
+	@discord.ui.button(label="Image", style=discord.ButtonStyle.secondary)
+	async def edit_image(  # type: ignore[override]
+		self, interaction: discord.Interaction, button: discord.ui.Button
+	) -> None:
+		try:
+			await interaction.response.send_modal(QuestImageModal(self.context, self))
+		except discord.NotFound:
+			return
+
+	@discord.ui.button(label="Refresh Preview", style=discord.ButtonStyle.secondary)
+	async def refresh_preview(  # type: ignore[override]
+		self, interaction: discord.Interaction, button: discord.ui.Button
+	) -> None:
+		await interaction.response.defer()
+		await self.context.session._update_preview(
+			self.context.quest,
+			view=self,
+		)
+
+	@discord.ui.button(style=discord.ButtonStyle.success)
+	async def submit_button(  # type: ignore[override]
+		self, interaction: discord.Interaction, button: discord.ui.Button
+	) -> None:
+		missing: list[str] = []
+		if not self.context.quest.title:
+			missing.append("title")
+		if not self.context.quest.starting_at:
+			missing.append("start time")
+		if not self.context.quest.duration:
+			missing.append("duration")
+		if missing:
+			await self.context.session._flash_message(
+				interaction,
+				f"Please set the {', '.join(missing)} before saving.",
+			)
+			return
+
+		await interaction.response.defer()
+		result = self._build_result(True)
+		self.context.resolve(result)
+		self._set_disabled(True)
+		await self.context.session._update_preview(
+			self.context.quest,
+			view=self,
+		)
+		self.stop()
+
+	@discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger)
+	async def cancel_button(  # type: ignore[override]
+		self, interaction: discord.Interaction, button: discord.ui.Button
+	) -> None:
+		await interaction.response.defer()
+		if self.context.mode == "create":
+			message = "Quest creation cancelled."
+		else:
+			message = "Quest update cancelled."
+		result = self._build_result(False, message)
+		self.context.resolve(result)
+		self._set_disabled(True)
+		await self.context.session._update_preview(
+			self.context.quest,
+			view=self,
+		)
+		self.stop()
+
+	def _set_disabled(self, value: bool) -> None:
+		for item in self._all_items:
+			item.disabled = value
+
+
+class _BaseQuestModal(discord.ui.Modal):
+	def __init__(
+		self,
+		context: QuestWizardContext,
+		view: QuestWizardView,
+		*,
+		title: str,
+	) -> None:
+		super().__init__(title=title)
+		self.context = context
+		self.view = view
+
+
+class QuestTitleModal(_BaseQuestModal):
+	def __init__(self, context: QuestWizardContext, view: QuestWizardView) -> None:
+		super().__init__(context, view, title="Quest Title")
+		self.title_input = discord.ui.TextInput(
+			label="Title",
+			default=context.quest.title or "",
+			max_length=200,
+		)
+		self.add_item(self.title_input)
+
+	async def on_submit(self, interaction: discord.Interaction) -> None:
+		self.context.quest.title = self.title_input.value.strip() or None
+		await interaction.response.defer()
+		await self.context.session._update_preview(
+			self.context.quest,
+			view=self.view,
+		)
+
+
+class QuestDescriptionModal(_BaseQuestModal):
+	def __init__(self, context: QuestWizardContext, view: QuestWizardView) -> None:
+		super().__init__(context, view, title="Quest Description")
+		self.description_input = discord.ui.TextInput(
+			label="Description",
+			style=discord.TextStyle.paragraph,
+			required=False,
+			max_length=2000,
+			default=self.context.quest.description or "",
+			placeholder="Optional description. Leave blank to clear.",
+		)
+		self.add_item(self.description_input)
+
+	async def on_submit(self, interaction: discord.Interaction) -> None:
+		self.context.quest.description = self.description_input.value.strip() or None
+		await interaction.response.defer()
+		await self.context.session._update_preview(
+			self.context.quest,
+			view=self.view,
+		)
+
+
+class QuestStartModal(_BaseQuestModal):
+	def __init__(self, context: QuestWizardContext, view: QuestWizardView) -> None:
+		super().__init__(context, view, title="Quest Start Time")
+		default_value = ""
+		if context.quest.starting_at:
+			default_value = str(int(context.quest.starting_at.replace(tzinfo=timezone.utc).timestamp()))
+		self.start_input = discord.ui.TextInput(
+			label="Start Time (epoch seconds)",
+			placeholder="Example: 1761424020",
+			default=default_value,
+			max_length=32,
+		)
+		self.add_item(self.start_input)
+
+	async def on_submit(self, interaction: discord.Interaction) -> None:
+		value = self.start_input.value.strip()
+		parsed = self.context.session._parse_datetime(value)
+		if parsed is None:
+			await self.context.session._flash_message(
+				interaction,
+				"Could not parse start time. Provide epoch seconds (UTC).",
+			)
+			return
+		self.context.quest.starting_at = parsed
+		await interaction.response.defer()
+		await self.context.session._update_preview(
+			self.context.quest,
+			view=self.view,
+		)
+
+
+class QuestDurationModal(_BaseQuestModal):
+	def __init__(self, context: QuestWizardContext, view: QuestWizardView) -> None:
+		super().__init__(context, view, title="Quest Duration")
+		default_value = ""
+		if context.quest.duration is not None:
+			default_value = f"{context.quest.duration.total_seconds() / 3600:.2f}".rstrip("0").rstrip(".")
+		self.duration_input = discord.ui.TextInput(
+			label="Duration (hours)",
+			placeholder="Enter a positive number (e.g., 2 or 2.5)",
+			default=default_value,
+			max_length=10,
+		)
+		self.add_item(self.duration_input)
+
+	async def on_submit(self, interaction: discord.Interaction) -> None:
+		value = self.duration_input.value.strip()
+		parsed = self.context.session._parse_duration(value)
+		if parsed is None:
+			await self.context.session._flash_message(
+				interaction,
+				"Duration must be a positive number of hours (e.g., 2 or 2.5).",
+			)
+			return
+		self.context.quest.duration = parsed
+		await interaction.response.defer()
+		await self.context.session._update_preview(
+			self.context.quest,
+			view=self.view,
+		)
+
+
+class QuestImageModal(_BaseQuestModal):
+	def __init__(self, context: QuestWizardContext, view: QuestWizardView) -> None:
+		super().__init__(context, view, title="Quest Image")
+		self.image_input = discord.ui.TextInput(
+			label="Image URL",
+			required=False,
+			default=context.quest.image_url or "",
+			placeholder="Must start with http or https. Leave blank to clear.",
+		)
+		self.add_item(self.image_input)
+
+	async def on_submit(self, interaction: discord.Interaction) -> None:
+		value = self.image_input.value.strip()
+		if value and not value.lower().startswith(("http://", "https://")):
+			await self.context.session._flash_message(
+				interaction,
+				"Image URL must start with http:// or https://",
+			)
+			return
+		self.context.quest.image_url = value or None
+		await interaction.response.defer()
+		await self.context.session._update_preview(
+			self.context.quest,
+			view=self.view,
+		)
 
 
 class QuestCreationSession(QuestSessionBase):
@@ -2420,78 +2746,29 @@ class QuestCreationSession(QuestSessionBase):
 			raw="",
 			status=QuestStatus.DRAFT,
 		)
+		context = QuestWizardContext(self, quest, mode="create")
+		view = QuestWizardView(context)
+		await self._update_preview(
+			quest,
+			header=(
+				"**Quest Draft Preview**\n"
+				"Use the buttons below to update fields. "
+				"Title, start time, and duration are required. "
+				"Start time must be epoch seconds (UTC)."
+			),
+			view=view,
+		)
 		try:
-			await self._safe_send(
-				f"Let's draft quest `{quest_id}`. I'll ask a few questions; type `cancel` any time to stop."
-			)
-			title = await self._ask("**Step 1:** What's the quest title?", required=True)
-			quest.title = title.strip()
-			await self._update_preview(quest)
+			result: QuestCreationResult = await context.future
+		finally:
+			if self._preview_message is not None:
+				with suppress(Exception):
+					await self._preview_message.edit(view=None)
 
-			description = await self._ask(
-				"**Step 2:** Provide a short description (or `skip`).",
-				required=False,
-				allow_skip=True,
-			)
-			if description is not None:
-				quest.description = description.strip() or None
-			await self._update_preview(quest)
-
-			start_input = await self._ask(
-				"**Step 3:** When does it start? Use `YYYY-MM-DD HH:MM` (UTC) or `<t:epoch>`.",
-				required=True,
-			)
-			start_dt = self._parse_datetime(start_input or "")
-			if start_dt is None:
-				return QuestCreationResult(
-					False,
-					error="Could not parse start time. Use `YYYY-MM-DD HH:MM` (UTC) or `<t:epoch>` format.",
-				)
-			quest.starting_at = start_dt
-			await self._update_preview(quest)
-
-			duration_input = await self._ask(
-				"**Step 4:** Duration in hours (e.g., `3`, `2.5`).",
-				required=True,
-			)
-			timedelta_value = self._parse_duration(duration_input or "")
-			if timedelta_value is None or timedelta_value.total_seconds() <= 0:
-				return QuestCreationResult(
-					False,
-					error="Duration must be a positive number of hours (e.g., 2 or 2.5).",
-				)
-			quest.duration = timedelta_value
-			await self._update_preview(quest)
-
-			image_input = await self._ask(
-				"**Step 5:** Optional cover image URL (or `skip`).",
-				required=False,
-				allow_skip=True,
-			)
-			if image_input is not None:
-				image_url = image_input.strip()
-				if image_url:
-					if not image_url.lower().startswith("http"):
-						return QuestCreationResult(
-							False,
-							error="Image URL must start with http or https.",
-						)
-					quest.image_url = image_url
-				else:
-					quest.image_url = None
-			await self._update_preview(quest)
-		except TimeoutError:
-			return QuestCreationResult(
-				False,
-				error="Timed out waiting for a response. Run `/quest create` again when you're ready.",
-			)
-		except RuntimeError as exc:
-			return QuestCreationResult(False, error=str(exc))
-
-		description_text = quest.description or "No description provided."
-		quest.raw = f"## {quest.title}\n\n{description_text}"
-
-		return QuestCreationResult(True, quest=quest)
+		if result.success and result.quest:
+			description_text = result.quest.description or "No description provided."
+			result.quest.raw = f"## {result.quest.title}\n\n{description_text}"
+		return result
 
 
 class QuestUpdateSession(QuestSessionBase):
@@ -2508,90 +2785,21 @@ class QuestUpdateSession(QuestSessionBase):
 		self.quest = quest
 
 	async def run(self) -> QuestUpdateResult:
+		context = QuestWizardContext(self, self.quest, mode="update")
+		view = QuestWizardView(context)
+		await self._update_preview(
+			self.quest,
+			header="**Quest Preview**\nUpdate fields with the buttons below, then save your changes. Start time must be epoch seconds (UTC).",
+			view=view,
+		)
 		try:
-			await self._safe_send(
-				"Let's update your quest. Respond with new values or `skip` to keep existing settings."
-			)
-			await self._update_preview(self.quest, header="**Current quest preview:**")
-			title = await self._ask(
-				"**Step 1:** Update the quest title (or `skip`).",
-				required=False,
-				allow_skip=True,
-			)
-			description = await self._ask(
-				"**Step 2:** Update the description (or `skip`, `clear`).",
-				required=False,
-				allow_skip=True,
-				allow_clear=True,
-			)
-			start_input = await self._ask(
-				"**Step 3:** Update start time (`skip` to keep, `clear` to remove).",
-				required=False,
-				allow_skip=True,
-				allow_clear=True,
-			)
-			duration_input = await self._ask(
-				"**Step 4:** Update duration in hours (e.g., `3`, `2.5`; `skip`, `clear`).",
-				required=False,
-				allow_skip=True,
-				allow_clear=True,
-			)
-			image_input = await self._ask(
-				"**Step 5:** Update image URL (`skip`, `clear`).",
-				required=False,
-				allow_skip=True,
-				allow_clear=True,
-			)
-		except TimeoutError:
-			return QuestUpdateResult(False, error="Timed out waiting for a response. Run `/quest edit` again when you're ready.")
-		except RuntimeError as exc:
-			return QuestUpdateResult(False, error=str(exc))
+			result: QuestUpdateResult = await context.future
+		finally:
+			if self._preview_message is not None:
+				with suppress(Exception):
+					await self._preview_message.edit(view=None)
 
-		if title not in (None, ""):
-			self.quest.title = title.strip()
-		elif title == "":
-			self.quest.title = None
-		await self._update_preview(self.quest)
-
-		if description is not None:
-			stripped_description = description.strip()
-			self.quest.description = stripped_description if stripped_description else None
-		await self._update_preview(self.quest)
-
-		if start_input is not None:
-			if start_input == "":
-				self.quest.starting_at = None
-			else:
-				parsed = self._parse_datetime(start_input)
-				if parsed is None:
-					return QuestUpdateResult(False, error="Could not parse the provided start time.")
-				self.quest.starting_at = parsed
-		await self._update_preview(self.quest)
-
-		if duration_input is not None:
-			if duration_input == "":
-				self.quest.duration = None
-			else:
-				parsed_duration = self._parse_duration(duration_input)
-				if parsed_duration is None:
-					return QuestUpdateResult(False, error="Duration must be a positive number of hours (e.g., 2 or 2.5).")
-				self.quest.duration = parsed_duration
-		await self._update_preview(self.quest)
-
-		if image_input is not None:
-			if image_input == "":
-				self.quest.image_url = None
-			else:
-				value = image_input.strip()
-				if not value:
-					self.quest.image_url = None
-				elif value.lower().startswith("http"):
-					self.quest.image_url = value
-				else:
-					return QuestUpdateResult(False, error="Image URL must start with http or https.")
-		await self._update_preview(self.quest)
-
-		return QuestUpdateResult(True, quest=self.quest)
+		return result
 
 
 async def setup(bot: commands.Bot):
