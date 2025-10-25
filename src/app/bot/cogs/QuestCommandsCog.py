@@ -20,12 +20,14 @@ from app.bot.config import (
 )
 from app.bot.quest.models import ForgeDraft, ForgePreviewState
 from app.bot.quest.views import ForgeDraftView, QuestSignupView
+from app.bot.services import guild_settings_store
 from app.bot.utils.log_stream import send_demo_log
 from app.bot.utils.quest_embeds import (
 	QuestEmbedData,
 	QuestEmbedRoster,
 	build_quest_embed,
 )
+from app.bot.cogs._staff_utils import is_allowed_staff
 from app.domain.models.EntityIDModel import CharacterID, EntityID, QuestID, UserID
 from app.domain.models.QuestModel import PlayerSignUp, PlayerStatus, Quest, QuestStatus
 from app.domain.models.UserModel import User
@@ -1471,9 +1473,10 @@ class QuestCommandsCog(commands.Cog):
 			)
 			return
 
-		if not user.is_referee:
+		if not user.is_referee and not is_allowed_staff(self.bot, member):
 			await interaction.followup.send(
-				"You need the REFEREE role to create quests.", ephemeral=True
+				"You need the REFEREE role or an allowed staff role to create quests.",
+				ephemeral=True,
 			)
 			return
 
@@ -1510,7 +1513,30 @@ class QuestCommandsCog(commands.Cog):
 			approved_by_display=member.mention,
 		)
 
-		announcement = await interaction.channel.send(
+		target_channel = interaction.channel
+		placement_note: Optional[str] = None
+		settings = guild_settings_store.fetch_settings(interaction.guild.id) or {}
+		target_channel_id = settings.get("quest_commands_channel_id")
+		if target_channel_id is not None:
+			try:
+				candidate = interaction.guild.get_channel(int(target_channel_id))
+			except (TypeError, ValueError):
+				candidate = None
+			if isinstance(candidate, discord.TextChannel):
+				if candidate.permissions_for(interaction.guild.me).send_messages:
+					target_channel = candidate
+				else:
+					placement_note = (
+						f"I do not have permission to post in {candidate.mention}; "
+						f"used {interaction.channel.mention} instead."
+					)
+			else:
+				placement_note = (
+					"The configured quest commands channel could not be found. "
+					f"Used {interaction.channel.mention} instead."
+				)
+
+		announcement = await target_channel.send(
 			content=f"{member.mention} scheduled a quest!",
 			embed=embed,
 			view=QuestSignupView(self, str(quest_id)),
@@ -1533,10 +1559,17 @@ class QuestCommandsCog(commands.Cog):
 			f"Quest `{quest.quest_id}` created by {member.mention} in {interaction.channel.mention}",
 		)
 
-		await interaction.followup.send(
-			f"Quest `{quest.quest_id}` created and announced in {announcement.channel.mention}.",
-			ephemeral=True,
+		followup_message = (
+			f"Quest `{quest.quest_id}` created and announced in {announcement.channel.mention}."
 		)
+		if placement_note:
+			followup_message = f"{followup_message}\n{placement_note}"
+		elif target_channel.id != interaction.channel.id:
+			followup_message = (
+				f"{followup_message}\nPosted in the configured quest channel."
+			)
+
+		await interaction.followup.send(followup_message, ephemeral=True)
 
 	@app_commands.command(
 		name="joinquest",

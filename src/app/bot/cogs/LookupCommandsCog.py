@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import math
 from datetime import datetime, timezone
@@ -12,6 +14,7 @@ from discord.ext import commands
 from app.domain.models.LookupModel import LookupEntry
 from app.domain.models.UserModel import User
 from app.infra.mongo.lookup_repo import LookupRepoMongo
+from app.bot.cogs._staff_utils import is_allowed_staff
 
 
 class LookupCommandsCog(commands.Cog):
@@ -22,16 +25,50 @@ class LookupCommandsCog(commands.Cog):
 	def __init__(self, bot: commands.Bot):
 		self.bot = bot
 		self.repo = LookupRepoMongo()
+		self._sync_task: Optional[asyncio.Task[None]] = None
 
 	async def cog_load(self) -> None:
-		try:
-			self.bot.tree.add_command(self.lookup)
-		except app_commands.CommandAlreadyRegistered:
-			self.bot.tree.remove_command(self.lookup.name, type=self.lookup.type)
-			self.bot.tree.add_command(self.lookup)
+		self._sync_task = self.bot.loop.create_task(self._sync_lookup_commands())
 
 	async def cog_unload(self) -> None:
-		self.bot.tree.remove_command(self.lookup.name, type=self.lookup.type)
+		if self._sync_task is not None:
+			self._sync_task.cancel()
+			with contextlib.suppress(asyncio.CancelledError):
+				await self._sync_task
+			self._sync_task = None
+		for guild in list(self.bot.guilds):
+			target = self._guild_object(guild.id)
+			self.bot.tree.remove_command(self.lookup.name, type=self.lookup.type, guild=target)
+			try:
+				await self.bot.tree.sync(guild=target)
+			except Exception:  # pragma: no cover - defensive logging
+				logging.exception("Failed to sync lookup removal for guild %s", guild.id)
+
+	async def _sync_lookup_commands(self) -> None:
+		await self.bot.wait_until_ready()
+		for guild in list(self.bot.guilds):
+			await self._register_for_guild(guild.id)
+
+	async def _register_for_guild(self, guild_id: int) -> None:
+		target = self._guild_object(guild_id)
+		try:
+			self.bot.tree.add_command(self.lookup, guild=target, override=True)
+			await self.bot.tree.sync(guild=target)
+		except Exception:
+			logging.exception("Failed to sync lookup commands for guild %s", guild_id)
+
+	@staticmethod
+	def _guild_object(guild_id: int) -> discord.Object:
+		return discord.Object(id=guild_id)
+
+	@commands.Cog.listener()
+	async def on_guild_join(self, guild: discord.Guild) -> None:
+		await self._register_for_guild(guild.id)
+
+	@commands.Cog.listener()
+	async def on_guild_remove(self, guild: discord.Guild) -> None:
+		target = self._guild_object(guild.id)
+		self.bot.tree.remove_command(self.lookup.name, type=self.lookup.type, guild=target)
 
 	async def _ensure_guild_cache(self, guild: discord.Guild) -> None:
 		if guild.id not in self.bot.guild_data:
@@ -57,8 +94,7 @@ class LookupCommandsCog(commands.Cog):
 		return user
 
 	async def _is_staff(self, member: discord.Member) -> bool:
-		perms = member.guild_permissions
-		if perms.manage_guild or perms.manage_messages or perms.administrator:
+		if is_allowed_staff(self.bot, member):
 			return True
 
 		try:

@@ -78,7 +78,10 @@ class Nonagon(commands.Bot):
 		except Exception as e:
 			logging.error(f"Auto persist loop encountered an error: {e}")
 
-		await self._sync_application_commands()
+		try:
+			self.loop.create_task(self._sync_application_commands())
+		except Exception:
+			logging.exception("Failed to schedule application command sync task")
 
 		# Call the parent setup_hook to ensure all cogs are loaded
 		await super().setup_hook()
@@ -217,30 +220,44 @@ class Nonagon(commands.Bot):
 			logging.info("Completed user flush cycle (%d items)", len(to_flush))
 
 	async def _sync_application_commands(self) -> None:
+		await self.wait_until_ready()
+
 		try:
-			if self.primary_guild_id:
-				guild_obj = discord.Object(id=self.primary_guild_id)
-				guild_commands = await self.tree.sync(guild=guild_obj)
-				logging.info(
-					"Synced %d slash commands to guild %s",
-					len(guild_commands),
-					self.primary_guild_id,
-				)
-			global_commands = await self.tree.sync()
-			logging.info("Synced %d global slash commands", len(global_commands))
-			for guild in self.guilds:
+			commands_snapshot = list(self.tree.get_commands())
+			if commands_snapshot:
 				try:
-					scoped_commands = await self.tree.sync(
-						guild=discord.Object(id=guild.id)
-					)
+					self.tree.clear_commands(guild=None)
+					await self.tree.sync()
+					logging.info("Cleared global slash commands to avoid duplicates.")
+				except Exception:
+					logging.exception("Failed to clear global slash commands")
+				finally:
+					for command in commands_snapshot:
+						try:
+							self.tree.add_command(command, override=True)
+						except Exception:
+							logging.exception(
+								"Failed to re-register command %s after clearing globals",
+								getattr(command, "qualified_name", command.name),
+							)
+
+			target_guild_ids = {guild.id for guild in self.guilds}
+			if self.primary_guild_id:
+				target_guild_ids.add(self.primary_guild_id)
+
+			for guild_id in target_guild_ids:
+				try:
+					guild_obj = discord.Object(id=guild_id)
+					self.tree.copy_global_to(guild=guild_obj)
+					scoped_commands = await self.tree.sync(guild=guild_obj)
 					logging.info(
 						"Synced %d slash commands to guild %s",
 						len(scoped_commands),
-						guild.id,
+						guild_id,
 					)
 				except Exception:
 					logging.exception(
-						"Failed to sync application commands for guild %s", guild.id
+						"Failed to sync application commands for guild %s", guild_id
 					)
 		except Exception:
 			logging.exception("Failed to sync application commands")

@@ -27,6 +27,7 @@ class User:
 
 	# Roles
 	roles: List[Role] = field(default_factory=lambda: [Role.MEMBER])
+	has_server_tag: bool = False
 
 	# Communication preferences
 	dm_opt_in: bool = True
@@ -189,6 +190,8 @@ class User:
 
 		if not isinstance(self.dm_opt_in, bool):
 			raise ValueError("dm_opt_in must be a boolean")
+		if not isinstance(self.has_server_tag, bool):
+			raise ValueError("has_server_tag must be a boolean")
 
 		if self.joined_at is not None and not isinstance(self.joined_at, datetime):
 			raise ValueError("joined_at must be a datetime or None")
@@ -433,52 +436,81 @@ class Player:
 
 		characters = payload.get("characters")
 		if characters is not None:
-			payload["characters"] = [
-				(
-					CharacterID(**c)
-					if isinstance(c, dict)
-					else (CharacterID.parse(c) if isinstance(c, str) else c)
-				)
-				for c in characters
-			]
+			payload["characters"] = [cls._coerce_character_id(c) for c in characters]
 
 		quests_applied = payload.get("quests_applied")
 		if quests_applied is not None:
 			payload["quests_applied"] = [
-				(
-					QuestID(**q)
-					if isinstance(q, dict)
-					else (QuestID.parse(q) if isinstance(q, str) else q)
-				)
-				for q in quests_applied
+				cls._coerce_quest_id(q) for q in quests_applied
 			]
 
 		quests_played = payload.get("quests_played")
 		if quests_played is not None:
 			payload["quests_played"] = [
-				(
-					QuestID(**q)
-					if isinstance(q, dict)
-					else (QuestID.parse(q) if isinstance(q, str) else q)
-				)
-				for q in quests_played
+				cls._coerce_quest_id(q) for q in quests_played
 			]
 
 		summaries_written = payload.get("summaries_written")
 		if summaries_written is not None:
 			payload["summaries_written"] = [
-				(
-					SummaryID(**s)
-					if isinstance(s, dict)
-					else (SummaryID.parse(s) if isinstance(s, str) else s)
-				)
-				for s in summaries_written
+				cls._coerce_summary_id(s) for s in summaries_written
 			]
 
 		return cls(**payload)
 
 	def to_dict(self) -> Dict[str, Any]:
 		return asdict(self)
+
+	@staticmethod
+	def _coerce_character_id(value: Any) -> CharacterID:
+		if isinstance(value, CharacterID):
+			return value
+		if isinstance(value, dict):
+			raw = value.get("value")
+			if raw:
+				return CharacterID.parse(str(raw))
+			number = value.get("number")
+			prefix = value.get("prefix", CharacterID.prefix)
+			if number is not None:
+				return CharacterID.parse(f"{prefix}{number}")
+			raise ValueError("Unsupported character ID payload")
+		if isinstance(value, str):
+			return CharacterID.parse(value)
+		return CharacterID.parse(str(value))
+
+	@staticmethod
+	def _coerce_quest_id(value: Any) -> QuestID:
+		if isinstance(value, QuestID):
+			return value
+		if isinstance(value, dict):
+			raw = value.get("value")
+			if raw:
+				return QuestID.parse(str(raw))
+			number = value.get("number")
+			prefix = value.get("prefix", QuestID.prefix)
+			if number is not None:
+				return QuestID.parse(f"{prefix}{number}")
+			raise ValueError("Unsupported quest ID payload")
+		if isinstance(value, str):
+			return QuestID.parse(value)
+		return QuestID.parse(str(value))
+
+	@staticmethod
+	def _coerce_summary_id(value: Any) -> SummaryID:
+		if isinstance(value, SummaryID):
+			return value
+		if isinstance(value, dict):
+			raw = value.get("value")
+			if raw:
+				return SummaryID.parse(str(raw))
+			number = value.get("number")
+			prefix = value.get("prefix", SummaryID.prefix)
+			if number is not None:
+				return SummaryID.parse(f"{prefix}{number}")
+			raise ValueError("Unsupported summary ID payload")
+		if isinstance(value, str):
+			return SummaryID.parse(value)
+		return SummaryID.parse(str(value))
 
 
 @dataclass
