@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from typing import Dict, Optional
+import logging
 
 import discord
 from discord import app_commands
 from discord.ext import commands
+from pymongo.errors import PyMongoError
 
 from app.bot.database import db_client
 from app.bot.services import guild_settings_store
@@ -400,6 +402,18 @@ class SetupCommandsCog(commands.Cog):
 		except (discord.Forbidden, discord.HTTPException) as exc:
 			await interaction.followup.send(
 				f"Failed to fetch members: {exc}", ephemeral=True
+			)
+			return
+		except PyMongoError as exc:
+			logging.exception(
+				"Failed to refresh guild cache for guild %s due to database error: %s",
+				guild.id,
+				exc,
+			)
+			await interaction.followup.send(
+				"Unable to connect to the database while refreshing members. "
+				"Verify the MongoDB service is reachable and try again.",
+				ephemeral=True,
 			)
 			return
 

@@ -27,11 +27,11 @@ class Quest:
 	quest_id: QuestID
 	guild_id: int
 	referee_id: UserID  # Referee responsible
+	raw: str  # raw markdown input
 	channel_id: str | None = None
 	message_id: str | None = None
 
 	# Metadata
-	raw: str  # raw markdown input
 	title: str = None
 	description: str = None
 	starting_at: datetime = None

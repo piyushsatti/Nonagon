@@ -157,7 +157,6 @@ class Nonagon(commands.Bot):
 		logging.info("Starting auto persist loop...")
 		while not self.is_closed():
 			await asyncio.sleep(15)
-			logging.info("Flushing dirty user data to MongoDB...")
 			to_flush: dict[tuple[int, int], User] = {}
 			try:
 				while True:
@@ -180,7 +179,10 @@ class Nonagon(commands.Bot):
 			except asyncio.QueueEmpty:
 				pass
 
-			logging.info("Flushing %d user records to MongoDB", len(to_flush))
+			if not to_flush:
+				continue
+
+			logging.info("Persisting %d user records to MongoDB", len(to_flush))
 			for (gid, uid), user in to_flush.items():
 				guild_entry = self.guild_data.get(gid)
 				if guild_entry is None:
@@ -217,7 +219,7 @@ class Nonagon(commands.Bot):
 						user.user_id,
 						exc,
 					)
-			logging.info("Completed user flush cycle (%d items)", len(to_flush))
+			logging.debug("Completed user flush cycle (%d items)", len(to_flush))
 
 	async def _sync_application_commands(self) -> None:
 		await self.wait_until_ready()
