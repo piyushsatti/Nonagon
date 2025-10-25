@@ -544,7 +544,7 @@ class QuestCommandsCog(commands.Cog):
 			payload["starting_at"] = quest.starting_at.isoformat()
 
 		if quest.duration is not None:
-			payload["duration_hours"] = int(quest.duration.total_seconds() // 3600)
+			payload["duration_hours"] = quest.duration.total_seconds() / 3600.0
 
 		params = {
 			"channel_id": quest.channel_id,
@@ -837,21 +837,34 @@ class QuestCommandsCog(commands.Cog):
 
 		ref_payload = ref_doc if ref_doc else doc.get("referee")
 
+		starting_at = doc.get("starting_at")
+		if isinstance(starting_at, str):
+			try:
+				starting_at = datetime.fromisoformat(starting_at)
+			except ValueError:
+				starting_at = None
+		if isinstance(starting_at, datetime):
+			if starting_at.tzinfo is None or starting_at.tzinfo.utcoffset(starting_at) is None:
+				starting_at = starting_at.replace(tzinfo=timezone.utc)
+
+		duration = None
+		if doc.get("duration") is not None:
+			try:
+				duration = timedelta(seconds=float(doc["duration"]))
+			except (TypeError, ValueError):
+				duration = None
+
 		quest = Quest(
 			quest_id=self._parse_entity_id(QuestID, quest_id_doc, fallback=doc.get("_id")),
 			guild_id=int(stored_gid),
 			referee_id=self._parse_entity_id(UserID, ref_payload),
-			channel_id=doc["channel_id"],
-			message_id=doc["message_id"],
 			raw=doc.get("raw", ""),
+			channel_id=doc.get("channel_id"),
+			message_id=doc.get("message_id"),
 			title=doc.get("title"),
 			description=doc.get("description"),
-			starting_at=doc.get("starting_at"),
-			duration=(
-				timedelta(seconds=float(doc["duration"]))
-				if doc.get("duration") is not None
-				else None
-			),
+			starting_at=starting_at,
+			duration=duration,
 			image_url=doc.get("image_url"),
 		)
 
@@ -863,9 +876,46 @@ class QuestCommandsCog(commands.Cog):
 				else QuestStatus(status_value)
 			)
 
+		announce_at = doc.get("announce_at")
+		if isinstance(announce_at, str):
+			try:
+				announce_at = datetime.fromisoformat(announce_at)
+			except ValueError:
+				announce_at = None
+		if isinstance(announce_at, datetime):
+			if announce_at.tzinfo is None or announce_at.tzinfo.utcoffset(announce_at) is None:
+				announce_at = announce_at.replace(tzinfo=timezone.utc)
+		quest.announce_at = announce_at
+
 		quest.started_at = doc.get("started_at")
+		if isinstance(quest.started_at, str):
+			try:
+				quest.started_at = datetime.fromisoformat(quest.started_at)
+			except ValueError:
+				quest.started_at = None
+		if isinstance(quest.started_at, datetime):
+			if quest.started_at.tzinfo is None or quest.started_at.tzinfo.utcoffset(quest.started_at) is None:
+				quest.started_at = quest.started_at.replace(tzinfo=timezone.utc)
+
 		quest.ended_at = doc.get("ended_at")
+		if isinstance(quest.ended_at, str):
+			try:
+				quest.ended_at = datetime.fromisoformat(quest.ended_at)
+			except ValueError:
+				quest.ended_at = None
+		if isinstance(quest.ended_at, datetime):
+			if quest.ended_at.tzinfo is None or quest.ended_at.tzinfo.utcoffset(quest.ended_at) is None:
+				quest.ended_at = quest.ended_at.replace(tzinfo=timezone.utc)
+
 		quest.last_nudged_at = doc.get("last_nudged_at")
+		if isinstance(quest.last_nudged_at, str):
+			try:
+				quest.last_nudged_at = datetime.fromisoformat(quest.last_nudged_at)
+			except ValueError:
+				quest.last_nudged_at = None
+		if isinstance(quest.last_nudged_at, datetime):
+			if quest.last_nudged_at.tzinfo is None or quest.last_nudged_at.tzinfo.utcoffset(quest.last_nudged_at) is None:
+				quest.last_nudged_at = quest.last_nudged_at.replace(tzinfo=timezone.utc)
 
 		signups: list[PlayerSignUp] = []
 		for entry in doc.get("signups", []):
@@ -2338,20 +2388,16 @@ class QuestSessionBase:
 			return None
 
 	def _parse_duration(self, value: str) -> Optional[timedelta]:
-		text = value.strip().lower()
+		text = value.strip()
 		if not text:
 			return None
-		if text.isdigit():
-			return timedelta(hours=int(text))
-		hours = 0
-		minutes = 0
-		for match in re.findall(r"(\d+)\s*h", text):
-			hours += int(match)
-		for match in re.findall(r"(\d+)\s*m", text):
-			minutes += int(match)
-		if hours == 0 and minutes == 0:
+		try:
+			hours_float = float(text)
+		except ValueError:
 			return None
-		return timedelta(hours=hours, minutes=minutes)
+		if hours_float <= 0:
+			return None
+		return timedelta(hours=hours_float)
 
 
 class QuestCreationSession(QuestSessionBase):
@@ -2405,14 +2451,14 @@ class QuestCreationSession(QuestSessionBase):
 			await self._update_preview(quest)
 
 			duration_input = await self._ask(
-				"**Step 4:** Duration (e.g., `3` or `2h 30m`).",
+				"**Step 4:** Duration in hours (e.g., `3`, `2.5`).",
 				required=True,
 			)
 			timedelta_value = self._parse_duration(duration_input or "")
 			if timedelta_value is None or timedelta_value.total_seconds() <= 0:
 				return QuestCreationResult(
 					False,
-					error="Duration must be a positive amount of time.",
+					error="Duration must be a positive number of hours (e.g., 2 or 2.5).",
 				)
 			quest.duration = timedelta_value
 			await self._update_preview(quest)
@@ -2485,7 +2531,7 @@ class QuestUpdateSession(QuestSessionBase):
 				allow_clear=True,
 			)
 			duration_input = await self._ask(
-				"**Step 4:** Update duration (e.g., `3` or `2h 30m`, `skip`, `clear`).",
+				"**Step 4:** Update duration in hours (e.g., `3`, `2.5`; `skip`, `clear`).",
 				required=False,
 				allow_skip=True,
 				allow_clear=True,
@@ -2528,7 +2574,7 @@ class QuestUpdateSession(QuestSessionBase):
 			else:
 				parsed_duration = self._parse_duration(duration_input)
 				if parsed_duration is None:
-					return QuestUpdateResult(False, error="Could not parse the provided duration.")
+					return QuestUpdateResult(False, error="Duration must be a positive number of hours (e.g., 2 or 2.5).")
 				self.quest.duration = parsed_duration
 		await self._update_preview(self.quest)
 

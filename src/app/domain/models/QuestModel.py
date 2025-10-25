@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, fields, replace
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Dict, List
 
@@ -104,12 +104,27 @@ class Quest:
 	# ---------- Helpers ----------
 
 	def validate_quest(self) -> None:
+		if self.starting_at:
+			if (
+				self.starting_at.tzinfo is None
+				or self.starting_at.tzinfo.utcoffset(self.starting_at) is None
+			):
+				self.starting_at = self.starting_at.replace(tzinfo=timezone.utc)
+
+		if self.announce_at:
+			if (
+				self.announce_at.tzinfo is None
+				or self.announce_at.tzinfo.utcoffset(self.announce_at) is None
+			):
+				self.announce_at = self.announce_at.replace(tzinfo=timezone.utc)
+
+		now_utc = datetime.now(timezone.utc)
 
 		if self.starting_at and self.duration:
 			if self.duration < timedelta(minutes=60):
 				raise ValueError("Duration must be at least 60 minutes.")
 
-		if self.starting_at and self.starting_at < datetime.now():
+		if self.starting_at and self.starting_at < now_utc:
 			raise ValueError("Starting time must be in the future.")
 
 		if self.duration and self.duration < timedelta(minutes=15):
