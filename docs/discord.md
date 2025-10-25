@@ -79,6 +79,19 @@ This page documents the bot’s slash commands, their inputs, permission require
   - Output: ephemeral confirmation; channel notice encouraging summaries
   - Logging: info log; demo log
 
+## Summaries
+
+- `/summary create`
+  - Flow: Kicks off a DM wizard to gather title, linked quests, involved characters, and a short TL;DR, then immediately posts an embed in the configured summary channel and opens a discussion thread.
+  - Permissions: must run in a guild; caller must own at least one character (staff override honoured).
+  - Output: summary embed + new thread prompting the author to share the full write-up; links and metadata stored for later reference.
+  - Logging: demo log entry so moderators can track shared summaries.
+- `/summary edit`
+  - Inputs: `summary:<ID>`
+  - Permissions: summary author (staff override).
+  - Flow: DM wizard mirrors create, allowing skip/clear per field, and refreshes the public embed in place.
+  - Output: updated embed and metadata; long-form thread content remains untouched.
+
 ## Quest Signup Buttons
 
 - `Request to Join`

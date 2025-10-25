@@ -63,6 +63,7 @@ class DMCommandsCog(commands.Cog):
 			"Available commands:\n"
 			"• `/character create` – create a character\n"
 			"• `/quest create` – start a quest draft (referees)\n"
+			"• `/summary create` – share a quest recap (players)\n"
 			"• `/stats` – view engagement metrics\n"
 			"• `/nudges enable|disable` – control reminders\n"
 		)

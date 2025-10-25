@@ -87,7 +87,7 @@ class DemoCommandsCog(commands.Cog):
 		)
 		embed.add_field(
 			name="Core Commands",
-			value="`/quest create`, `/joinquest`, `/character create`, `/stats`, `/leaderboard`",
+			value="`/quest create`, `/summary create`, `/joinquest`, `/character create`, `/stats`, `/leaderboard`",
 			inline=False,
 		)
 		embed.add_field(
