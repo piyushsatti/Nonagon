@@ -1496,14 +1496,6 @@ class QuestCommandsCog(commands.Cog):
 				return
 
 			quest = result.quest
-			try:
-				quest.validate_quest()
-			except ValueError as exc:
-				await interaction.followup.send(
-					f"Quest validation failed: {exc}", ephemeral=True
-				)
-				return
-
 			self._persist_quest(interaction.guild.id, quest)
 			dm_sent = True
 			dm_message = (
@@ -1526,6 +1518,22 @@ class QuestCommandsCog(commands.Cog):
 				reply += " I sent you a DM with the preview and next steps."
 			else:
 				reply += " I couldn't DM you the preview—check your privacy settings."
+
+			post_view = QuestAnnounceView(
+				self,
+				session,
+				interaction.guild,
+				member,
+				quest,
+			)
+			await session._update_preview(
+				quest,
+				header=(
+					"**Quest Draft Saved**\n"
+					"Announce immediately or schedule an announcement using the buttons below."
+				),
+				view=post_view,
+			)
 
 			await interaction.followup.send(reply, ephemeral=True)
 		finally:
@@ -1906,14 +1914,6 @@ class QuestCommandsCog(commands.Cog):
 				)
 				return
 
-			try:
-				result.quest.validate_quest()
-			except ValueError as exc:
-				await interaction.followup.send(
-					f"Quest validation failed: {exc}", ephemeral=True
-				)
-				return
-
 			self._persist_quest(interaction.guild.id, result.quest)
 			if result.quest.channel_id and result.quest.message_id:
 				await self._sync_quest_announcement(
@@ -1949,6 +1949,23 @@ class QuestCommandsCog(commands.Cog):
 				response += " DM sent with the latest preview."
 			else:
 				response += " I couldn't DM the preview—check your privacy settings."
+
+			if not result.quest.channel_id and result.quest.status is QuestStatus.DRAFT:
+				post_view = QuestAnnounceView(
+					self,
+					session,
+					interaction.guild,
+					member,
+					result.quest,
+				)
+				await session._update_preview(
+					result.quest,
+					header=(
+						"**Quest Draft Saved**\n"
+						"Announce immediately or schedule an announcement using the buttons below."
+					),
+					view=post_view,
+				)
 
 			await interaction.followup.send(response, ephemeral=True)
 		finally:
@@ -2438,12 +2455,12 @@ class QuestWizardContext:
 class QuestWizardView(discord.ui.View):
 	def __init__(self, context: QuestWizardContext) -> None:
 		super().__init__(timeout=context.timeout)
-		self._all_items: list[discord.ui.Item] = list(self.children)
 		self.context = context
 		if context.mode == "create":
 			self.submit_button.label = "Save Draft"
 		else:
 			self.submit_button.label = "Save Changes"
+		self._all_items: list[discord.ui.Item] = list(self.children)
 
 	def _build_result(self, success: bool, error: Optional[str] = None) -> Any:
 		if self.context.mode == "create":
@@ -2547,6 +2564,15 @@ class QuestWizardView(discord.ui.View):
 			await self.context.session._flash_message(
 				interaction,
 				f"Please set the {', '.join(missing)} before saving.",
+			)
+			return
+
+		try:
+			self.context.quest.validate_quest()
+		except ValueError as exc:
+			await self.context.session._flash_message(
+				interaction,
+				f"Quest validation failed: {exc}",
 			)
 			return
 
@@ -2722,6 +2748,162 @@ class QuestImageModal(_BaseQuestModal):
 		await interaction.response.defer()
 		await self.context.session._update_preview(
 			self.context.quest,
+			view=self.view,
+		)
+
+
+class QuestAnnounceView(discord.ui.View):
+	def __init__(
+		self,
+		cog: "QuestCommandsCog",
+		session: QuestSessionBase,
+		guild: discord.Guild,
+		member: discord.Member,
+		quest: Quest,
+	) -> None:
+		super().__init__(timeout=600)
+		self.cog = cog
+		self.session = session
+		self.guild = guild
+		self.member = member
+		self.quest = quest
+		self._all_items: list[discord.ui.Item] = list(self.children)
+
+	async def interaction_check(self, interaction: discord.Interaction) -> bool:
+		if interaction.user.id != self.member.id:
+			await interaction.response.send_message(
+				"Only the quest referee can use these buttons.", ephemeral=True
+			)
+			return False
+		return True
+
+	def _set_disabled(self, value: bool) -> None:
+		for item in self._all_items:
+			item.disabled = value
+
+	@discord.ui.button(label="Announce Now", style=discord.ButtonStyle.success)
+	async def announce_now(  # type: ignore[override]
+		self, interaction: discord.Interaction, button: discord.ui.Button
+	) -> None:
+		await interaction.response.defer()
+		if self.quest.channel_id and self.quest.message_id:
+			await interaction.followup.send(
+				"This quest is already announced. Use `/quest edit` for changes.",
+			)
+			return
+		try:
+			await self.cog._announce_quest_now(
+				self.guild,
+				self.quest,
+				invoker=self.member,
+				fallback_channel=None,
+			)
+		except ValueError as exc:
+			await interaction.followup.send(str(exc))
+			return
+		except Exception as exc:  # pragma: no cover - defensive
+			logging.exception("Quest announce via DM failed: %s", exc)
+			await interaction.followup.send("Unable to announce the quest right now.")
+			return
+
+		channel_display = "the configured channel"
+		if self.quest.channel_id:
+			channel = self.guild.get_channel(int(self.quest.channel_id))
+			if channel is not None:
+				channel_display = channel.mention
+		await interaction.followup.send(
+			f"Quest `{self.quest.quest_id}` announced in {channel_display}.",
+		)
+		self._set_disabled(True)
+		await self.session._update_preview(
+			self.quest,
+			header="**Quest Announced**\nUse `/quest edit` for further changes.",
+			view=self,
+		)
+		self.stop()
+
+	@discord.ui.button(label="Schedule", style=discord.ButtonStyle.secondary)
+	async def schedule_button(  # type: ignore[override]
+		self, interaction: discord.Interaction, button: discord.ui.Button
+	) -> None:
+		if self.quest.channel_id and self.quest.message_id:
+			await interaction.response.send_message(
+				"Announced quests cannot be rescheduled via this wizard.",
+				ephemeral=True,
+			)
+			return
+		try:
+			await interaction.response.send_modal(
+				QuestScheduleModal(self.cog, self.session, self.guild, self.quest, self)
+			)
+		except discord.NotFound:
+			return
+
+	@discord.ui.button(label="Close", style=discord.ButtonStyle.danger)
+	async def close_button(  # type: ignore[override]
+		self, interaction: discord.Interaction, button: discord.ui.Button
+	) -> None:
+		self._set_disabled(True)
+		await interaction.response.defer()
+		await self.session._update_preview(
+			self.quest,
+			header="**Quest Draft Saved**",
+			view=self,
+		)
+		self.stop()
+
+
+class QuestScheduleModal(discord.ui.Modal):
+	def __init__(
+		self,
+		cog: "QuestCommandsCog",
+		session: QuestSessionBase,
+		guild: discord.Guild,
+		quest: Quest,
+		view: QuestAnnounceView,
+	) -> None:
+		super().__init__(title="Schedule Quest Announcement")
+		self.cog = cog
+		self.session = session
+		self.guild = guild
+		self.quest = quest
+		self.view = view
+		self.time_input = discord.ui.TextInput(
+			label="Announcement Time (epoch seconds, UTC)",
+			placeholder="Example: 1761424020",
+			max_length=32,
+		)
+		self.add_item(self.time_input)
+
+	async def on_submit(self, interaction: discord.Interaction) -> None:
+		value = self.time_input.value.strip()
+		if not value.isdigit():
+			await self.session._flash_message(
+				interaction,
+				"Enter epoch seconds (UTC).",
+			)
+			return
+		seconds = int(value)
+		scheduled = datetime.fromtimestamp(seconds, tz=timezone.utc)
+		if scheduled <= datetime.now(timezone.utc):
+			await self.session._flash_message(
+				interaction,
+				"Scheduled time must be in the future.",
+			)
+			return
+		self.quest.announce_at = scheduled
+		self.quest.status = QuestStatus.DRAFT
+		self.cog._persist_quest(self.guild.id, self.quest)
+		await interaction.response.send_message(
+			f"Quest `{self.quest.quest_id}` will announce at <t:{seconds}:F>.",
+		)
+		header = (
+			"**Quest Draft Saved**\n"
+			f"Scheduled to announce at <t:{seconds}:F>."
+		)
+		await self.session._update_preview(
+			self.quest,
+			header=header,
 			view=self.view,
 		)
 
