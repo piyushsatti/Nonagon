@@ -25,7 +25,7 @@ class LookupCommandsCog(commands.Cog):
 	def __init__(self, bot: commands.Bot):
 		self.bot = bot
 		self.repo = LookupRepoMongo()
-		self._sync_task: Optional[asyncio.Task[None]] = None
+	self._sync_task: Optional[asyncio.Task[None]] = None
 
 	async def cog_load(self) -> None:
 		self._sync_task = self.bot.loop.create_task(self._sync_lookup_commands())
@@ -332,4 +332,10 @@ class LookupListView(discord.ui.View):
 
 
 async def setup(bot: commands.Bot) -> None:  # pragma: no cover - extension entry point
+<<<<<<< HEAD
 	await bot.add_cog(LookupCommandsCog(bot))
+=======
+    # Use override=True to replace any previously-registered /lookup command
+    # This prevents CommandAlreadyRegistered when an older registration exists.
+    await bot.add_cog(LookupCommandsCog(bot), override=True)
+>>>>>>> fix/dev-migration

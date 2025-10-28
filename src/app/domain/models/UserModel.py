@@ -434,27 +434,80 @@ class Player:
 		valid = {f.name for f in fields(cls)}
 		payload = {k: v for k, v in data.items() if k in valid}
 
+<<<<<<< HEAD
 		characters = payload.get("characters")
 		if characters is not None:
-			payload["characters"] = [cls._coerce_character_id(c) for c in characters]
+        characters = payload.get("characters")
+        if characters is not None:
+            chars: List[CharacterID] = []
+            for c in characters:
+                if isinstance(c, dict):
+                    if "value" in c:
+                        chars.append(CharacterID.parse(c["value"]))
+                    elif "number" in c:
+                        prefix = c.get("prefix", CharacterID.prefix)
+                        chars.append(CharacterID.parse(f"{prefix}{c['number']}"))
+                    else:
+                        raise ValueError("Unsupported character id payload")
+                elif isinstance(c, str):
+                    chars.append(CharacterID.parse(c))
+                else:
+                    chars.append(c)
+            payload["characters"] = chars
 
-		quests_applied = payload.get("quests_applied")
-		if quests_applied is not None:
-			payload["quests_applied"] = [
-				cls._coerce_quest_id(q) for q in quests_applied
-			]
+        quests_applied = payload.get("quests_applied")
+        if quests_applied is not None:
+            qa: List[QuestID] = []
+            for q in quests_applied:
+                if isinstance(q, dict):
+                    if "value" in q:
+                        qa.append(QuestID.parse(q["value"]))
+                    elif "number" in q:
+                        prefix = q.get("prefix", QuestID.prefix)
+                        qa.append(QuestID.parse(f"{prefix}{q['number']}"))
+                    else:
+                        raise ValueError("Unsupported quest id payload")
+                elif isinstance(q, str):
+                    qa.append(QuestID.parse(q))
+                else:
+                    qa.append(q)
+            payload["quests_applied"] = qa
 
-		quests_played = payload.get("quests_played")
-		if quests_played is not None:
-			payload["quests_played"] = [
-				cls._coerce_quest_id(q) for q in quests_played
-			]
+        quests_played = payload.get("quests_played")
+        if quests_played is not None:
+            qp: List[QuestID] = []
+            for q in quests_played:
+                if isinstance(q, dict):
+                    if "value" in q:
+                        qp.append(QuestID.parse(q["value"]))
+                    elif "number" in q:
+                        prefix = q.get("prefix", QuestID.prefix)
+                        qp.append(QuestID.parse(f"{prefix}{q['number']}"))
+                    else:
+                        raise ValueError("Unsupported quest id payload")
+                elif isinstance(q, str):
+                    qp.append(QuestID.parse(q))
+                else:
+                    qp.append(q)
+            payload["quests_played"] = qp
 
-		summaries_written = payload.get("summaries_written")
-		if summaries_written is not None:
-			payload["summaries_written"] = [
-				cls._coerce_summary_id(s) for s in summaries_written
-			]
+        summaries_written = payload.get("summaries_written")
+        if summaries_written is not None:
+            sw: List[SummaryID] = []
+            for s in summaries_written:
+                if isinstance(s, dict):
+                    if "value" in s:
+                        sw.append(SummaryID.parse(s["value"]))
+                    elif "number" in s:
+                        prefix = s.get("prefix", SummaryID.prefix)
+                        sw.append(SummaryID.parse(f"{prefix}{s['number']}"))
+                    else:
+                        raise ValueError("Unsupported summary id payload")
+                elif isinstance(s, str):
+                    sw.append(SummaryID.parse(s))
+                else:
+                    sw.append(s)
+            payload["summaries_written"] = sw
 
 		return cls(**payload)
 

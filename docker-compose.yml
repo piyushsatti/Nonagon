@@ -1,3 +1,4 @@
+
 services:
   api:
     build:
@@ -10,6 +11,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      - ./src:/app/src:ro
       - ./logs:/app/logs
     restart: unless-stopped
 
@@ -23,5 +25,6 @@ services:
       DB_NAME: ${DB_NAME:-nonagon}
       BOT_TOKEN: ${BOT_TOKEN:?Set BOT_TOKEN in .env}
     volumes:
+      - ./src:/app/src:ro
       - ./logs:/app/logs
     restart: unless-stopped
