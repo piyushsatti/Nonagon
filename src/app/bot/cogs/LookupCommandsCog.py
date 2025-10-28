@@ -23,15 +23,6 @@ class LookupCommandsCog(commands.Cog):
         self.bot = bot
         self.repo = LookupRepoMongo()
 
-    async def cog_load(self) -> None:
-        try:
-            self.bot.tree.add_command(self.lookup)
-        except app_commands.CommandAlreadyRegistered:
-            self.bot.tree.remove_command(self.lookup.name, type=self.lookup.type)
-            self.bot.tree.add_command(self.lookup)
-
-    async def cog_unload(self) -> None:
-        self.bot.tree.remove_command(self.lookup.name, type=self.lookup.type)
 
     async def _ensure_guild_cache(self, guild: discord.Guild) -> None:
         if guild.id not in self.bot.guild_data:
@@ -296,4 +287,6 @@ class LookupListView(discord.ui.View):
 
 
 async def setup(bot: commands.Bot) -> None:  # pragma: no cover - extension entry point
-    await bot.add_cog(LookupCommandsCog(bot))
+    # Use override=True to replace any previously-registered /lookup command
+    # This prevents CommandAlreadyRegistered when an older registration exists.
+    await bot.add_cog(LookupCommandsCog(bot), override=True)
