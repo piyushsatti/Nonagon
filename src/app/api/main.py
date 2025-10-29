@@ -10,32 +10,32 @@ from app.api.routers.users import router as users_router
 
 log_dir = Path("/app/logs")
 try:
-	log_dir.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True)
 except Exception as exc:  # pragma: no cover - defensive logging
-	logging.warning("Unable to create log directory %s: %s", log_dir, exc)
+    logging.warning("Unable to create log directory %s: %s", log_dir, exc)
 else:
-	log_path = log_dir / "api.log"
-	file_handler = logging.FileHandler(log_path, mode="w")
-	file_handler.setLevel(logging.INFO)
-	file_handler.setFormatter(
-		logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
-	)
-	root_logger = logging.getLogger()
-	if not any(
-		isinstance(handler, logging.FileHandler)
-		and getattr(handler, "baseFilename", "") == str(log_path)
-		for handler in root_logger.handlers
-	):
-		root_logger.addHandler(file_handler)
+    log_path = log_dir / "api.log"
+    file_handler = logging.FileHandler(log_path, mode="w")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    )
+    root_logger = logging.getLogger()
+    if not any(
+        isinstance(handler, logging.FileHandler)
+        and getattr(handler, "baseFilename", "") == str(log_path)
+        for handler in root_logger.handlers
+    ):
+        root_logger.addHandler(file_handler)
 
 app = FastAPI(title="Nonagon API", version="1.0.0")
 
 app.add_middleware(
-	CORSMiddleware,
-	allow_origins=["*"],
-	allow_credentials=True,
-	allow_methods=["*"],
-	allow_headers=["*"],
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Routers
@@ -47,12 +47,12 @@ app.include_router(demo_router)
 
 @app.get("/healthz")
 def healthz():
-	return {"ok": True}
+    return {"ok": True}
 
 
 if __name__ == "__main__":
-	import uvicorn
+    import uvicorn
 
-	uvicorn.run(
-		"app.api.main:app", host="localhost", port=8000, reload=True, log_level="debug"
-	)
+    uvicorn.run(
+        "app.api.main:app", host="localhost", port=8000, reload=True, log_level="debug"
+    )
