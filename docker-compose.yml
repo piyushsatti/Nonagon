@@ -24,6 +24,7 @@ services:
       MONGO_URI: ${MONGO_URI:?Set MONGO_URI in .env}
       DB_NAME: ${DB_NAME:-nonagon}
       BOT_TOKEN: ${BOT_TOKEN:?Set BOT_TOKEN in .env}
+      PYTHONPATH: /app/src
     volumes:
       - ./src:/app/src:ro
       - ./logs:/app/logs
