@@ -5,7 +5,7 @@ import json
 import logging
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Type, Literal, Callable
 
 import aiohttp
 import discord
@@ -1342,10 +1342,161 @@ class QuestCommandsCog(commands.Cog):
     ) -> Optional[discord.Member]:
         return await self._resolve_member_for_user_id(guild, user_id)
 
+    async def _ensure_dm_channel(
+        self, interaction: discord.Interaction, member: discord.Member
+    ) -> Optional[Messageable]:
+        try:
+            return await member.create_dm()
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "I can't send you direct messages. Enable DMs from server members and run `/quest create` again.",
+                ephemeral=True,
+            )
+            return None
+
+    _SESSION_ERROR_HANDLERS: Dict[type[Exception], Callable[[Exception], str]] = {
+        RuntimeError: lambda exc: str(exc),
+        discord.HTTPException: lambda exc: (
+            "Quest creation encountered a Discord error. Please try again later."
+        ),
+    }
+
+    async def _handle_session_error(
+        self, interaction: discord.Interaction, error: Exception
+    ) -> None:
+        for exc_type, formatter in self._SESSION_ERROR_HANDLERS.items():
+            if isinstance(error, exc_type):
+                message = formatter(error)
+                break
+        else:
+            logging.exception("Unexpected quest creation session error: %s", error)
+            message = (
+                "Quest creation encountered an unexpected error. Please try again later."
+            )
+
+        await interaction.followup.send(message, ephemeral=True)
+
+    async def _run_quest_creation_session(
+        self,
+        session: "QuestCreationSession",
+        interaction: discord.Interaction,
+    ) -> Optional[Quest]:
+        try:
+            result = await session.run()
+        except Exception as exc:
+            await self._handle_session_error(interaction, exc)
+            return None
+
+        if not result.success or result.quest is None:
+            await interaction.followup.send(
+                result.error or "Quest creation cancelled.",
+                ephemeral=True,
+            )
+            return None
+
+        return result.quest
+
+    async def _send_creation_summary(
+        self,
+        session: "QuestCreationSession",
+        quest: Quest,
+        dm_message: str,
+    ) -> bool:
+        try:
+            await session.send_completion_summary(quest, dm_message)
+            return True
+        except RuntimeError:
+            return False
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logging.exception("Quest creation summary DM failed: %s", exc)
+            return False
+
     @quest.command(name="create", description="Start a DM wizard to draft a quest.")
     @app_commands.guild_only()
     async def quest_create(self, interaction: discord.Interaction) -> None:
-        await quest_commands.quest_create(self, interaction)
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "This command can only be used inside a guild.", ephemeral=True
+            )
+            return
+
+        member = interaction.user
+        if not isinstance(member, discord.Member):
+            await interaction.response.send_message(
+                "Only guild members can manage quests.", ephemeral=True
+            )
+            return
+
+        try:
+            user = await self._get_cached_user(member)
+        except RuntimeError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+
+        if not user.is_referee and not is_allowed_staff(self.bot, member):
+            await interaction.response.send_message(
+                "You need the REFEREE role or an allowed staff role to create quests.",
+                ephemeral=True,
+            )
+            return
+
+        if member.id in self._active_quest_sessions:
+            await interaction.response.send_message(
+                "You already have an active quest session. Complete or cancel it before starting a new one.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        self._active_quest_sessions.add(member.id)
+        try:
+            dm_channel = await self._ensure_dm_channel(interaction, member)
+            if dm_channel is None:
+                return
+
+            session = QuestCreationSession(
+                self, interaction.guild, member, user, dm_channel
+            )
+            quest = await self._run_quest_creation_session(session, interaction)
+            if quest is None:
+                return
+
+            self._persist_quest(interaction.guild.id, quest)
+            dm_message = (
+                f"Quest `{quest.quest_id}` is saved as a draft.\n"
+                f"Run `/quest announce` in the server with Quest ID `{quest.quest_id}` when you're ready to publish, "
+                "or `/quest edit` to make further changes."
+            )
+            dm_sent = await self._send_creation_summary(session, quest, dm_message)
+
+            reply = (
+                f"Quest `{quest.quest_id}` drafted. "
+                "Use `/quest announce` when you're ready to publish it."
+            )
+            if dm_sent:
+                reply += " I sent you a DM with the preview and next steps."
+            else:
+                reply += " I couldn't DM you the preview—check your privacy settings."
+
+            post_view = QuestAnnounceView(
+                self,
+                session,
+                interaction.guild,
+                member,
+                quest,
+            )
+            await session._update_preview(
+                quest,
+                header=(
+                    "**Quest Draft Saved**\n"
+                    "Announce immediately or schedule an announcement using the buttons below."
+                ),
+                view=post_view,
+            )
+
+            await interaction.followup.send(reply, ephemeral=True)
+        finally:
+            self._active_quest_sessions.discard(member.id)
 
     @quest.command(name="announce", description="Announce a quest now or at a scheduled time.")
     @app_commands.describe(
