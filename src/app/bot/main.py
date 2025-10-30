@@ -82,31 +82,23 @@ class Nonagon(commands.Bot):
 
     # Called to login and connect the bot to Discord
     async def start(self, BOT_TOKEN):
-        async def _idle_forever(reason: str) -> None:
-            logging.error(
-                "%s. Bot will remain idle until restarted with valid credentials.",
-                reason,
-            )
-            while True:
-                await asyncio.sleep(30)
-
         normalized = (BOT_TOKEN or "").strip()
         placeholders = {"", "replace_me"}
 
         if normalized.lower() in placeholders:
-            await _idle_forever(
-                "BOT_TOKEN is missing or still set to the placeholder value"
-            )
-            return
+            logging.error("BOT_TOKEN is missing or still set to the placeholder value.")
+            raise SystemExit(1)
 
         try:
             await super().start(normalized)
-        except discord.LoginFailure as exc:
-            await _idle_forever(f"Discord login failed: {exc}")
-        except discord.HTTPException as exc:
-            await _idle_forever(f"Discord HTTP error during startup: {exc}")
+        except (discord.LoginFailure, discord.HTTPException) as exc:
+            logging.error("Discord login failed: %s", exc)
+            await self.close()
+            raise SystemExit(1) from exc
         except Exception as exc:  # pragma: no cover - defensive fallback
-            await _idle_forever(f"Unexpected error during startup: {exc}")
+            logging.exception("Unexpected error during startup: %s", exc)
+            await self.close()
+            raise
 
     # Called when the bot is ready
     async def on_ready(self):
@@ -120,24 +112,18 @@ class Nonagon(commands.Bot):
         await super().on_error(event_method, *args, **kwargs)
 
     def _ensure_guild_entry(self, guild_id: int) -> dict[str, Any]:
-        entry = self.guild_data.get(guild_id)
-        if entry is None:
-            entry = {
-                "guild_id": guild_id,
-                "db": db_client.get_database(str(guild_id)),
-                "users": {},
-                "quests": {},
-                "characters": {},
-                "summaries": {},
-            }
-            self.guild_data[guild_id] = entry
-        else:
-            entry.setdefault("guild_id", guild_id)
-            entry.setdefault("db", db_client.get_database(str(guild_id)))
-            entry.setdefault("users", {})
-            entry.setdefault("quests", {})
-            entry.setdefault("characters", {})
-            entry.setdefault("summaries", {})
+        defaults = {
+            "guild_id": guild_id,
+            "db": db_client.get_database(str(guild_id)),
+            "users": {},
+            "quests": {},
+            "characters": {},
+            "summaries": {},
+        }
+        entry = self.guild_data.setdefault(guild_id, defaults)
+        for key, value in defaults.items():
+            entry.setdefault(key, value)
+        entry["guild_id"] = guild_id
         return entry
 
     async def _load_cache(self):
