@@ -3,7 +3,6 @@
 DEFAULT_EXTENSIONS: tuple[str, ...] = (
     "app.bot.cogs.admin.extension_manager",
     "app.bot.cogs.admin.permissions",
-    "app.bot.cogs.admin.diagnostics",
     "app.bot.cogs.listeners.guild_listeners",
     "app.bot.cogs.character.cog",
     "app.bot.cogs.guild.cog",

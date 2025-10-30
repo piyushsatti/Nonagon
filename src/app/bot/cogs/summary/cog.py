@@ -34,6 +34,13 @@ class SummaryCommandsCog(commands.Cog):
         *,
         service: Optional[SummaryService] = None,
     ) -> None:
+        """
+        Parameters
+        ----------
+        service:
+            Optional summary service. Defaults to ``SummaryService(bot)``. Supply a
+            stub in tests to avoid database access.
+        """
         self.bot = bot
         self.service = service or SummaryService(bot)
         self._active_summary_sessions: Set[int] = set()

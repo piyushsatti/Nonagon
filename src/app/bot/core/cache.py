@@ -126,7 +126,7 @@ async def auto_persist_loop(bot: commands.Bot) -> None:
             "batch": batch_size,
             "duration_ms": round(duration_ms, 2),
         }
-        logger.info("%s", metrics)
+        logger.info("flush_metrics %s", metrics)
 
         flush_stats = getattr(bot, "flush_stats", None)
         if not isinstance(flush_stats, dict):

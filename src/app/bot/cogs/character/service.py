@@ -1,3 +1,5 @@
+"""Service helpers backing the character cog."""
+
 from __future__ import annotations
 
 from typing import Dict, List, Optional
@@ -11,7 +13,12 @@ from app.infra.serialization import from_bson, to_bson
 
 
 class CharacterService:
-    """Persistence and cache helpers for character commands."""
+    """Persistence and cache helpers for character commands.
+
+    Instances are intended to be injected into ``CharacterCommandsCog``. They
+    accept a custom ``db_client`` or ``flush_via_adapter`` flag to mirror the
+    runtime settings while staying easy to stub in tests.
+    """
 
     def __init__(
         self,

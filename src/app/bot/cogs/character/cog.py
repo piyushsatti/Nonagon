@@ -51,6 +51,13 @@ class CharacterCommandsCog(commands.Cog):
         *,
         service: Optional[CharacterService] = None,
     ):
+        """
+        Parameters
+        ----------
+        service:
+            Optional character service. Defaults to ``CharacterService`` configured
+            from ``bot.settings``. Tests can supply a fake to bypass persistence.
+        """
         self.bot = bot
         settings = getattr(bot, "settings", None)
         flush_via_adapter = bool(getattr(settings, "flush_via_adapter", False))

@@ -10,6 +10,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from app.bot.cogs.listeners.member_cache import MemberCache
 from app.domain.models.LookupModel import LookupEntry
 from app.domain.models.UserModel import User
 from app.infra.mongo.lookup_repo import LookupRepoMongo
@@ -31,8 +32,16 @@ class LookupCommandsCog(commands.Cog):
         *,
         repo: Optional[LookupRepoMongo] = None,
     ):
+        """
+        Parameters
+        ----------
+        repo:
+            Optional lookup repository. Defaults to ``LookupRepoMongo()``. Tests
+            can supply a stub to avoid hitting MongoDB.
+        """
         self.bot = bot
         self.repo = repo or LookupRepoMongo()
+        self._member_cache = MemberCache(bot)
         self._sync_task: Optional[asyncio.Task[None]] = None
 
     async def cog_load(self) -> None:
@@ -79,27 +88,10 @@ class LookupCommandsCog(commands.Cog):
         self.bot.tree.remove_command(self.lookup.name, type=self.lookup.type, guild=target)
 
     async def _ensure_guild_cache(self, guild: discord.Guild) -> None:
-        if guild.id not in self.bot.guild_data:
-            await self.bot.load_or_create_guild_cache(guild)
+        await self._member_cache.ensure_guild_entry(guild)
 
     async def _get_cached_user(self, member: discord.Member) -> User:
-        await self._ensure_guild_cache(member.guild)
-        guild_entry = self.bot.guild_data[member.guild.id]
-
-        user = guild_entry["users"].get(member.id)
-        if user is not None:
-            return user
-
-        listener: Optional[commands.Cog] = self.bot.get_cog("GuildListenersCog")
-        if listener is None:
-            raise RuntimeError("Listener cog not loaded; cannot resolve users.")
-
-        ensure_method = getattr(listener, "_ensure_cached_user", None)
-        if ensure_method is None:
-            raise RuntimeError("Listener cog missing _ensure_cached_user helper.")
-
-        user = await ensure_method(member)  # type: ignore[misc]
-        return user
+        return await self._member_cache.ensure_cached_user(member)
 
     async def _is_staff(self, member: discord.Member) -> bool:
         if is_allowed_staff(self.bot, member):
