@@ -1,31 +1,21 @@
-
 services:
-  api:
+
+  bot:
+    container_name: bot
     build:
-      context: .
+      dockerfile: Dockerfile.bot
+    env_file: .env
+    volumes:
+      - ./:/nonagon
+      - ./logs:/nonagon/logs
+
+  api:
+    container_name: api
+    build:
       dockerfile: Dockerfile.api
     env_file: .env
-    environment:
-      MONGODB_URI: ${MONGO_URI:?Set MONGO_URI in .env}
-      DB_NAME: ${DB_NAME:-nonagon}
     ports:
       - "8000:8000"
     volumes:
-      - ./src:/app/src:ro
-      - ./logs:/app/logs
-    restart: unless-stopped
-
-  bot:
-    build:
-      context: .
-      dockerfile: Dockerfile.bot
-    env_file: .env
-    environment:
-      MONGO_URI: ${MONGO_URI:?Set MONGO_URI in .env}
-      DB_NAME: ${DB_NAME:-nonagon}
-      BOT_TOKEN: ${BOT_TOKEN:?Set BOT_TOKEN in .env}
-      PYTHONPATH: /app/src
-    volumes:
-      - ./src:/app/src:ro
-      - ./logs:/app/logs
-    restart: unless-stopped
+      - ./:/nonagon
+      - ./logs:/nonagon/logs

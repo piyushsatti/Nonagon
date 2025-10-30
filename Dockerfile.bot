@@ -1,14 +1,5 @@
 FROM python:3.13-slim
-
-WORKDIR /app
-
-# Copy only the packaging metadata and source needed to install dependencies.
-COPY pyproject.toml README.md /app/
-COPY src /app/src
-
-RUN python -m pip install .
-
-# Bring in the rest of the workspace (tests, scripts, etc.) for completeness.
+WORKDIR /nonagon
 COPY . .
-
-CMD ["python","-m","app.bot.main"]
+RUN python -m pip install .
+CMD ["python", "-m", "app.bot.main"]

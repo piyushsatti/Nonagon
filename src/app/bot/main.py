@@ -21,7 +21,9 @@ class Nonagon(commands.Bot):
     """
 
     def __init__(self, intents: discord.Intents):
-        super().__init__(command_prefix=commands.when_mentioned, intents=intents)
+        super().__init__(
+            command_prefix=commands.when_mentioned_or("n!"), intents=intents
+        )
         self.guild_data: dict[int, dict[str, Any]] = {}
         self.dirty_data: asyncio.Queue[tuple[int, int]] = asyncio.Queue()
 
@@ -74,11 +76,6 @@ class Nonagon(commands.Bot):
             self.loop.create_task(self._auto_persist_loop())
         except Exception as e:
             logging.error(f"Auto persist loop encountered an error: {e}")
-
-        try:
-            self.loop.create_task(self._sync_application_commands())
-        except Exception:
-            logging.exception("Failed to schedule application command sync task")
 
         # Call the parent setup_hook to ensure all cogs are loaded
         await super().setup_hook()
