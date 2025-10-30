@@ -28,53 +28,17 @@ class AdminCommandsCog(commands.Cog):
     async def cog_unload(self) -> None:
         self.bot.tree.remove_command(self.admin.name, type=self.admin.type)
 
-    async def _sync_guilds(self, target_ids: set[int]) -> list[str]:
-        results: list[str] = []
-        for guild_id in target_ids:
-            guild_obj = discord.Object(id=guild_id)
-            try:
-                self.bot.tree.copy_global_to(guild=guild_obj)
-                commands_synced = await self.bot.tree.sync(guild=guild_obj)
-                results.append(f"{guild_id}: {len(commands_synced)} commands")
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.exception("Failed to sync commands for guild %s", guild_id)
-                results.append(f"{guild_id}: failed ({exc})")
-        return results
+    # NOTE: Sync logic moved out of admin cog. Use owner diagnostics or extension manager to run syncs.
 
     @admin.command(
         name="sync",
-        description="Force a slash-command sync for this guild (or every guild).",
+        description="(disabled) Sync moved to owner diagnostics and extension manager.",
     )
-    @app_commands.describe(all_guilds="Sync every guild the bot is in (defaults to current guild only).")
-    @app_commands.guild_only()
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def sync(
-        self, interaction: discord.Interaction, all_guilds: Optional[bool] = False
-    ) -> None:
-        await interaction.response.defer(ephemeral=True, thinking=True)
-
-        target_ids: set[int]
-        if all_guilds:
-            target_ids = {guild.id for guild in self.bot.guilds}
-            if not target_ids:
-                await interaction.followup.send(
-                    "I'm not connected to any guilds yet; nothing to sync.",
-                    ephemeral=True,
-                )
-                return
-        else:
-            if interaction.guild is None:
-                await interaction.followup.send(
-                    "This command can only be used inside a guild.",
-                    ephemeral=True
-                )
-                return
-            target_ids = {interaction.guild.id}
-
-        results = await self._sync_guilds(target_ids)
+    async def sync(self, interaction: discord.Interaction, all_guilds: Optional[bool] = False) -> None:
+        await interaction.response.defer(ephemeral=True)
         await interaction.followup.send(
-            "Command sync results:\n" + "\n".join(results),
-            ephemeral=True
+            "The `/admin sync` command has been disabled. Bot owner can run `n!sync` (current guild) or `n!syncall` (all guilds).",
+            ephemeral=True,
         )
 
     @commands.group(name="admin", invoke_without_command=True)
@@ -83,28 +47,23 @@ class AdminCommandsCog(commands.Cog):
     async def admin_text_group(self, ctx: commands.Context) -> None:
         if ctx.invoked_subcommand is None:
             await ctx.send(
-                "Available admin subcommands: sync, sync_all.",
+                "Available admin subcommands: (sync commands disabled). Use owner-only diagnostics for sync tasks.",
                 delete_after=15,
             )
 
     @admin_text_group.command(name="sync")
     async def admin_text_sync(self, ctx: commands.Context) -> None:
-        if ctx.guild is None:
-            await ctx.send("This command can only be used inside a guild.")
-            return
-
-        results = await self._sync_guilds({ctx.guild.id})
-        await ctx.send("Command sync results:\n" + "\n".join(results))
+        await ctx.send(
+            "This command has been disabled. Bot owner can run `n!sync` for diagnostics.",
+            delete_after=15,
+        )
 
     @admin_text_group.command(name="sync_all")
     async def admin_text_sync_all(self, ctx: commands.Context) -> None:
-        target_ids = {guild.id for guild in self.bot.guilds}
-        if not target_ids:
-            await ctx.send("I'm not connected to any guilds yet; nothing to sync.")
-            return
-
-        results = await self._sync_guilds(target_ids)
-        await ctx.send("Command sync results:\n" + "\n".join(results))
+        await ctx.send(
+            "This command has been disabled. Bot owner can run `n!syncall` for diagnostics.",
+            delete_after=15,
+        )
 
 
 async def setup(bot: commands.Bot) -> None:

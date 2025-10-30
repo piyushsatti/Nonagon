@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import List, Tuple
+# inspect not required here
 
 import discord
-from discord import app_commands
 from discord.ext import commands
 
 from app.bot.database import db_client
 from app.bot.utils.logging import get_logger
+from app.bot.utils.sync import sync_guilds
 
 
 logger = get_logger(__name__)
@@ -48,6 +49,16 @@ class Diagnostics(commands.Cog):
         embed = self._make_embed("Diagnostics Error", f"{command}: {error}")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
+    async def _send_failure_for_ctx(
+        self, ctx: commands.Context, command: str, error: Exception
+    ) -> None:
+        logger.exception("Diagnostics command %s failed: %s", command, error)
+        embed = self._make_embed("Diagnostics Error", f"{command}: {error}")
+        try:
+            await ctx.send(embed=embed)
+        except Exception:
+            await ctx.send(f"Diagnostics Error: {command}: {error}")
+
     @staticmethod
     def _human_duration(delta: timedelta) -> str:
         total_seconds = int(delta.total_seconds())
@@ -77,11 +88,10 @@ class Diagnostics(commands.Cog):
 
     # --- commands ----------------------------------------------------------------
 
-    @app_commands.command(
-        name="botstatus", description="Show runtime diagnostics for the bot."
-    )
-    async def botstatus(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
+    @commands.command(name="botstatus")
+    @commands.is_owner()
+    async def botstatus_cmd(self, ctx: commands.Context) -> None:
+        """Owner-only: show runtime diagnostics (prefix command)."""
         try:
             now = datetime.now(timezone.utc)
             uptime = self._human_duration(now - self.started_at)
@@ -99,31 +109,31 @@ class Diagnostics(commands.Cog):
             )
             embed.add_field(
                 name="MongoDB",
-                value="✅ " + mongo_msg if mongo_ok else "⚠️ " + mongo_msg,
+                value=("✅ " + mongo_msg) if mongo_ok else ("⚠️ " + mongo_msg),
                 inline=True,
             )
             embed.add_field(name="Guilds", value=str(len(self.bot.guilds)), inline=True)
 
-            await interaction.followup.send(embed=embed, ephemeral=True)
-        except Exception as exc:  # pragma: no cover - defensive logging
-            await self._send_failure(interaction, "botstatus", exc)
+            await ctx.send(embed=embed)
+        except Exception as exc:
+            await self._send_failure_for_ctx(ctx, "botstatus", exc)
 
-    @app_commands.command(name="loadedcogs", description="List loaded bot extensions.")
-    async def loadedcogs(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
+    @commands.command(name="loadedcogs")
+    @commands.is_owner()
+    async def loadedcogs_cmd(self, ctx: commands.Context) -> None:
+        """Owner-only: list loaded extensions (prefix command)."""
         try:
             cogs = sorted(self.bot.extensions.keys())
             description = "\n".join(cogs) if cogs else "No extensions loaded."
             embed = self._make_embed("Loaded Cogs", description)
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await ctx.send(embed=embed)
         except Exception as exc:
-            await self._send_failure(interaction, "loadedcogs", exc)
+            await self._send_failure_for_ctx(ctx, "loadedcogs", exc)
 
-    @app_commands.command(
-        name="commandcheck", description="Inspect registered slash commands."
-    )
-    async def commandcheck(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
+    @commands.command(name="commandcheck")
+    @commands.is_owner()
+    async def commandcheck_cmd(self, ctx: commands.Context) -> None:
+        """Owner-only: inspect registered application commands (prefix command)."""
         try:
             lines: List[str] = []
             for command in self.bot.tree.get_commands():
@@ -135,18 +145,16 @@ class Diagnostics(commands.Cog):
                 "Command Audit",
                 "\n".join(lines) if lines else "No commands registered.",
             )
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await ctx.send(embed=embed)
         except Exception as exc:
-            await self._send_failure(interaction, "commandcheck", exc)
+            await self._send_failure_for_ctx(ctx, "commandcheck", exc)
 
-    @app_commands.command(
-        name="permscheck", description="Check bot permissions for a channel."
-    )
-    @app_commands.describe(channel="Channel to inspect")
-    async def permscheck(
-        self, interaction: discord.Interaction, channel: discord.abc.GuildChannel
+    @commands.command(name="permscheck")
+    @commands.is_owner()
+    async def permscheck_cmd(
+        self, ctx: commands.Context, channel: discord.abc.GuildChannel
     ) -> None:
-        await interaction.response.defer(ephemeral=True)
+        """Owner-only: check bot permissions for a channel (prefix command)."""
         try:
             guild = channel.guild
             member = guild.me
@@ -155,7 +163,7 @@ class Diagnostics(commands.Cog):
             if member is None and self.bot.user is not None:
                 try:
                     member = await guild.fetch_member(self.bot.user.id)
-                except Exception:  # pragma: no cover - network edge
+                except Exception:
                     member = None
 
             if member is None:
@@ -167,7 +175,7 @@ class Diagnostics(commands.Cog):
             ]
 
             embed = self._make_embed("Permission Check")
-            embed.add_field(name="Channel", value=channel.mention, inline=False)
+            embed.add_field(name="Channel", value=getattr(channel, "mention", str(channel)), inline=False)
             embed.add_field(
                 name="Allowed",
                 value=", ".join(
@@ -182,15 +190,14 @@ class Diagnostics(commands.Cog):
                 inline=False,
             )
 
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await ctx.send(embed=embed)
         except Exception as exc:
-            await self._send_failure(interaction, "permscheck", exc)
+            await self._send_failure_for_ctx(ctx, "permscheck", exc)
 
-    @app_commands.command(
-        name="cacheprobe", description="Inspect guild and member cache state."
-    )
-    async def cacheprobe(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
+    @commands.command(name="cacheprobe")
+    @commands.is_owner()
+    async def cacheprobe_cmd(self, ctx: commands.Context) -> None:
+        """Owner-only: inspect guild and member cache state (prefix command)."""
         try:
             guild_cache = getattr(self.bot, "guild_data", {})
             cached_guilds = len(guild_cache)
@@ -236,25 +243,19 @@ class Diagnostics(commands.Cog):
             else:
                 embed.add_field(name="Mismatches", value="None", inline=False)
 
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await ctx.send(embed=embed)
         except Exception as exc:
-            await self._send_failure(interaction, "cacheprobe", exc)
+            await self._send_failure_for_ctx(ctx, "cacheprobe", exc)
 
-    @app_commands.command(
-        name="eventlog", description="Show recent events captured by the bot."
-    )
-    @app_commands.describe(latest="Number of most recent events to display")
-    async def eventlog(
-        self,
-        interaction: discord.Interaction,
-        latest: app_commands.Range[int, 1, 25] = 10,
-    ) -> None:
-        await interaction.response.defer(ephemeral=True)
+    @commands.command(name="eventlog")
+    @commands.is_owner()
+    async def eventlog_cmd(self, ctx: commands.Context, latest: int = 10) -> None:
+        """Owner-only: show recent events captured by the bot (prefix command)."""
         try:
             buffer = getattr(self.bot, "event_buffer", None)
             if not buffer:
                 embed = self._make_embed("Event Log", "Event buffer not implemented.")
-                await interaction.followup.send(embed=embed, ephemeral=True)
+                await ctx.send(embed=embed)
                 return
 
             recent = list(buffer)[-latest:]
@@ -262,9 +263,71 @@ class Diagnostics(commands.Cog):
             embed = self._make_embed(
                 "Event Log", "\n".join(lines) if lines else "No events recorded."
             )
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await ctx.send(embed=embed)
         except Exception as exc:
-            await self._send_failure(interaction, "eventlog", exc)
+            await self._send_failure_for_ctx(ctx, "eventlog", exc)
+
+    @commands.command(name="syncdiagnostic")
+    @commands.is_owner()
+    async def syncdiagnostic_cmd(self, ctx: commands.Context, all_guilds: bool = False) -> None:
+        """Owner-only: run a command-sync audit (prefix command).
+
+    Reuses centralized sync helper to perform a per-guild sync and report results.
+        Invoke as `n!syncdiagnostic` (current guild) or `n!syncdiagnostic True` (all guilds).
+        """
+        try:
+            # use centralized helper
+            if all_guilds:
+                target_ids = {guild.id for guild in self.bot.guilds}
+                if not target_ids:
+                    await ctx.send("Bot is not connected to any guilds; nothing to check.")
+                    return
+            else:
+                if ctx.guild is None:
+                    await ctx.send("This diagnostic must be run inside a guild unless `True` is passed to run across all guilds.")
+                    return
+                target_ids = {ctx.guild.id}
+
+            await ctx.send("Running command sync diagnostic… this will perform a command sync for target guild(s).")
+            results = await sync_guilds(self.bot, target_ids)
+            lines = [str(r) for r in (results or [])]
+            embed = self._make_embed("Command Sync Diagnostic", "\n".join(lines) if lines else "No results.")
+            await ctx.send(embed=embed)
+        except Exception as exc:
+            await self._send_failure_for_ctx(ctx, "syncdiagnostic", exc)
+
+    @commands.command(name="sync")
+    @commands.is_owner()
+    async def sync_cmd(self, ctx: commands.Context) -> None:
+        """Owner-only: sync application commands for the current guild (prefix)."""
+        try:
+            if ctx.guild is None:
+                await ctx.send("This command must be run inside a guild.")
+                return
+
+            await ctx.send("Running command sync for this guild…")
+            results = await sync_guilds(self.bot, {ctx.guild.id})
+            embed = self._make_embed("Command Sync (guild)", "\n".join(results) if results else "No results.")
+            await ctx.send(embed=embed)
+        except Exception as exc:
+            await self._send_failure_for_ctx(ctx, "sync", exc)
+
+    @commands.command(name="syncall")
+    @commands.is_owner()
+    async def syncall_cmd(self, ctx: commands.Context) -> None:
+        """Owner-only: sync application commands across all guilds (prefix)."""
+        try:
+            target_ids = {g.id for g in self.bot.guilds}
+            if not target_ids:
+                await ctx.send("Bot is not connected to any guilds; nothing to sync.")
+                return
+
+            await ctx.send("Running command sync across all guilds… this may take a while.")
+            results = await sync_guilds(self.bot, target_ids)
+            embed = self._make_embed("Command Sync (all guilds)", "\n".join(results) if results else "No results.")
+            await ctx.send(embed=embed)
+        except Exception as exc:
+            await self._send_failure_for_ctx(ctx, "syncall", exc)
 
 
 async def setup(bot: commands.Bot) -> None:

@@ -333,17 +333,11 @@ class SetupCommandsCog(commands.Cog):
             )
             return
 
-        await interaction.response.defer(ephemeral=True)
-
-        guild_obj = discord.Object(id=interaction.guild.id)
-        try:
-            self.bot.tree.copy_global_to(guild=guild_obj)
-            commands_synced = await self.bot.tree.sync(guild=guild_obj)
-            message = f"Synced {len(commands_synced)} slash commands to this guild."
-        except Exception as exc:
-            message = f"Failed to sync commands: {exc}"
-
-        await interaction.followup.send(message, ephemeral=True)
+        # Disabled: sync moved to owner diagnostics and extension manager.
+        await interaction.response.send_message(
+            "The `/setup sync` command has been disabled. Bot owner can run `n!sync` (current guild) or `n!syncall` (all guilds).",
+            ephemeral=True,
+        )
 
     @setup.command(
         name="refresh",
