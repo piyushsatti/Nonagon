@@ -52,6 +52,9 @@ class QuestSignupView(discord.ui.View):
         self.service = service
         self.quest_id = quest_id
 
+    class _ValidationError(Exception):
+        pass
+
     def _resolve_quest_id(self, interaction: discord.Interaction) -> str:
         if self.quest_id:
             return self.quest_id
@@ -63,6 +66,35 @@ class QuestSignupView(discord.ui.View):
                 return match.group(1)
         raise ValueError("Unable to determine quest id from message.")
 
+    async def _send_validation_error(
+        self, interaction: discord.Interaction, message: str
+    ) -> None:
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+
+    def _require_guild_member(
+        self, interaction: discord.Interaction, error_message: str
+    ) -> discord.Member:
+        member = interaction.user
+        if interaction.guild is None or not isinstance(member, discord.Member):
+            raise QuestSignupView._ValidationError(error_message)
+        return member
+
+    def _require_quest_id_str(self, interaction: discord.Interaction) -> str:
+        try:
+            return self._resolve_quest_id(interaction)
+        except ValueError as exc:
+            raise QuestSignupView._ValidationError(str(exc)) from exc
+
+    def _require_parsed_quest_id(self, interaction: discord.Interaction) -> QuestID:
+        quest_id_str = self._require_quest_id_str(interaction)
+        try:
+            return QuestID.parse(quest_id_str)
+        except ValueError as exc:
+            raise QuestSignupView._ValidationError(str(exc)) from exc
+
     @discord.ui.button(
         label="Request to Join",
         style=discord.ButtonStyle.success,
@@ -72,16 +104,12 @@ class QuestSignupView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         try:
-            quest_id = self._resolve_quest_id(interaction)
-        except ValueError as exc:
-            await interaction.response.send_message(str(exc), ephemeral=True)
-            return
-        if interaction.guild is None or not isinstance(
-            interaction.user, discord.Member
-        ):
-            await interaction.response.send_message(
-                "Unable to resolve characters outside a guild.", ephemeral=True
+            quest_id = self._require_quest_id_str(interaction)
+            member = self._require_guild_member(
+                interaction, "Unable to resolve characters outside a guild."
             )
+        except QuestSignupView._ValidationError as exc:
+            await self._send_validation_error(interaction, str(exc))
             return
 
         class _EphemeralJoin(discord.ui.View):
@@ -93,7 +121,7 @@ class QuestSignupView(discord.ui.View):
 
         await interaction.response.send_message(
             "Select your character to request a spot:",
-            view=_EphemeralJoin(self.service, quest_id, interaction.user),
+            view=_EphemeralJoin(self.service, quest_id, member),
             ephemeral=True,
         )
 
@@ -106,22 +134,16 @@ class QuestSignupView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         try:
-            quest_id_raw = self._resolve_quest_id(interaction)
-            quest_id = QuestID.parse(quest_id_raw)
-        except ValueError as exc:
-            await interaction.response.send_message(str(exc), ephemeral=True)
-            return
-
-        if interaction.guild is None or not isinstance(
-            interaction.user, discord.Member
-        ):
-            await interaction.response.send_message(
-                "Unable to review requests outside a guild.", ephemeral=True
+            quest_id = self._require_parsed_quest_id(interaction)
+            member = self._require_guild_member(
+                interaction, "Unable to review requests outside a guild."
             )
+        except QuestSignupView._ValidationError as exc:
+            await self._send_validation_error(interaction, str(exc))
             return
 
         try:
-            reviewer = await self.service.get_cached_user(interaction.user)
+            reviewer = await self.service.get_cached_user(member)
         except Exception:
             await interaction.response.send_message(
                 "Unable to resolve your profile; please try again shortly.",
@@ -135,7 +157,7 @@ class QuestSignupView(discord.ui.View):
             )
             return
 
-        quest = self.service.fetch_quest(interaction.guild.id, quest_id)
+        quest = self.service.fetch_quest(member.guild.id, quest_id)
         if quest is None:
             await interaction.response.send_message(
                 "Quest not found; please refresh the announcement.",
@@ -174,10 +196,9 @@ class QuestSignupView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         try:
-            quest_id_raw = self._resolve_quest_id(interaction)
-            quest_id = QuestID.parse(quest_id_raw)
-        except ValueError as exc:
-            await interaction.response.send_message(str(exc), ephemeral=True)
+            quest_id = self._require_parsed_quest_id(interaction)
+        except QuestSignupView._ValidationError as exc:
+            await self._send_validation_error(interaction, str(exc))
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -198,10 +219,9 @@ class QuestSignupView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         try:
-            quest_id = self._resolve_quest_id(interaction)
-            quest_id_obj = QuestID.parse(quest_id)
-        except ValueError as exc:
-            await interaction.response.send_message(str(exc), ephemeral=True)
+            quest_id_obj = self._require_parsed_quest_id(interaction)
+        except QuestSignupView._ValidationError as exc:
+            await self._send_validation_error(interaction, str(exc))
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)

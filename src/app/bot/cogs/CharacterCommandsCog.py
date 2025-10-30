@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+
+import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
@@ -10,6 +12,15 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from app.bot.character import (
+    CharacterConfirmView,
+    CharacterLinkView,
+    CharacterCreationSession,
+    CharacterUpdateSession,
+    build_character_embed,
+    build_character_embed_from_model,
+    status_label,
+)
 from app.bot.services import guild_settings_store
 from app.bot.utils.logging import get_logger
 from app.bot.cogs._staff_utils import is_allowed_staff
@@ -252,7 +263,7 @@ class CharacterCommandsCog(commands.Cog):
 
     @staticmethod
     def _status_label(status: CharacterRole) -> str:
-        return "Active" if status is CharacterRole.ACTIVE else "Retired"
+        return status_label(status)
 
     def _build_character_embed(
         self,
@@ -267,58 +278,21 @@ class CharacterCommandsCog(commands.Cog):
         status: CharacterRole,
         updated_at: Optional[datetime] = None,
     ) -> discord.Embed:
-        colour = (
-            discord.Color.blurple()
-            if status is CharacterRole.ACTIVE
-            else discord.Color.dark_grey()
+        return build_character_embed(
+            name=name,
+            ddb_link=ddb_link,
+            character_thread_link=character_thread_link,
+            token_link=token_link,
+            art_link=art_link,
+            description=description,
+            tags=tags,
+            status=status,
+            updated_at=updated_at,
         )
-        embed = discord.Embed(
-            title=name or "Unnamed Character",
-            description=description or "No description provided.",
-            colour=colour,
-            timestamp=updated_at or datetime.now(timezone.utc),
-        )
-        embed.add_field(
-            name="Sheet",
-            value=ddb_link or "Not set",
-            inline=False,
-        )
-        embed.add_field(
-            name="Character Thread",
-            value=character_thread_link or "Not set",
-            inline=False,
-        )
-        embed.add_field(
-            name="Token",
-            value=token_link or "Not set",
-            inline=False,
-        )
-        embed.add_field(
-            name="Status",
-            value=self._status_label(status),
-            inline=False,
-        )
-        if tags:
-            embed.add_field(
-                name="Tags",
-                value=", ".join(f"`{tag}`" for tag in tags),
-                inline=False,
-            )
-        if art_link:
-            embed.set_image(url=art_link)
-        return embed
 
     def _build_character_embed_from_model(self, character: Character) -> discord.Embed:
-        return self._build_character_embed(
-            name=character.name,
-            ddb_link=character.ddb_link,
-            character_thread_link=character.character_thread_link,
-            token_link=character.token_link,
-            art_link=character.art_link,
-            description=character.description,
-            tags=character.tags or [],
-            status=character.status,
-            updated_at=datetime.now(timezone.utc),
+        return build_character_embed_from_model(
+            character, updated_at=datetime.now(timezone.utc)
         )
 
     @staticmethod
@@ -736,7 +710,6 @@ class CharacterCommandsCog(commands.Cog):
         self, interaction: discord.Interaction, current: str
     ) -> List[app_commands.Choice[str]]:
         return await self._character_autocomplete(interaction, current)
-
 
 class CharacterSessionBase:
     def __init__(
@@ -1600,7 +1573,6 @@ class CharacterUpdateSession(CharacterSessionBase):
         if len(tags) > 20:
             raise ValueError("Please provide 20 or fewer tags.")
         return ", ".join(tags)
-
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(CharacterCommandsCog(bot))

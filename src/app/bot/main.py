@@ -99,10 +99,8 @@ class Nonagon(commands.Bot):
         placeholders = {"", "replace_me"}
 
         if normalized.lower() in placeholders:
-            await _idle_forever(
-                "BOT_TOKEN is missing or still set to the placeholder value"
-            )
-            return
+            logging.error("BOT_TOKEN is missing or still set to the placeholder value.")
+            raise SystemExit(1)
 
         try:
             await super().start(normalized)
@@ -125,24 +123,18 @@ class Nonagon(commands.Bot):
         await super().on_error(event_method, *args, **kwargs)
 
     def _ensure_guild_entry(self, guild_id: int) -> dict[str, Any]:
-        entry = self.guild_data.get(guild_id)
-        if entry is None:
-            entry = {
-                "guild_id": guild_id,
-                "db": db_client.get_database(str(guild_id)),
-                "users": {},
-                "quests": {},
-                "characters": {},
-                "summaries": {},
-            }
-            self.guild_data[guild_id] = entry
-        else:
-            entry.setdefault("guild_id", guild_id)
-            entry.setdefault("db", db_client.get_database(str(guild_id)))
-            entry.setdefault("users", {})
-            entry.setdefault("quests", {})
-            entry.setdefault("characters", {})
-            entry.setdefault("summaries", {})
+        defaults = {
+            "guild_id": guild_id,
+            "db": db_client.get_database(str(guild_id)),
+            "users": {},
+            "quests": {},
+            "characters": {},
+            "summaries": {},
+        }
+        entry = self.guild_data.setdefault(guild_id, defaults)
+        for key, value in defaults.items():
+            entry.setdefault(key, value)
+        entry["guild_id"] = guild_id
         return entry
 
     async def _load_cache(self):
