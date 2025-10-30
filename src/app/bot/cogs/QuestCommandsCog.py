@@ -6,7 +6,7 @@ import logging
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Type, Literal
+from typing import Any, Dict, List, Optional, Literal
 
 import aiohttp
 import discord
@@ -20,6 +20,14 @@ from app.bot.config import (
     QUEST_BOARD_CHANNEL_ID,
 )
 from app.bot.quest.views import QuestSignupView
+from app.bot.ui.wizards import (
+    ContextAwareModal,
+    PreviewWizardContext,
+    PreviewWizardView,
+    WizardSessionBase,
+    parse_epoch_seconds,
+    parse_positive_hours,
+)
 from app.bot.services import guild_settings_store
 from app.bot.utils.log_stream import send_demo_log
 from app.bot.utils.quest_embeds import (
@@ -2268,7 +2276,7 @@ class QuestUpdateResult:
 
 
 
-class QuestSessionBase:
+class QuestSessionBase(WizardSessionBase):
     def __init__(
         self,
         cog: "QuestCommandsCog",
@@ -2277,30 +2285,15 @@ class QuestSessionBase:
         user: User,
         dm_channel: discord.DMChannel,
     ) -> None:
+        super().__init__(
+            bot=cog.bot,
+            guild=guild,
+            member=member,
+            dm_channel=dm_channel,
+            timeout=300,
+        )
         self.cog = cog
-        self.guild = guild
-        self.member = member
         self.user = user
-        self.dm = dm_channel
-        self.timeout = 300
-        self.data: Dict[str, Optional[str]] = {}
-        self._preview_message: Optional[discord.Message] = None
-
-    async def _safe_send(
-        self,
-        content: Optional[str] = None,
-        *,
-        embed: Optional[discord.Embed] = None,
-        view: Optional[discord.ui.View] = None,
-    ) -> discord.Message:
-        try:
-            return await self.dm.send(content=content, embed=embed, view=view)
-        except discord.Forbidden as exc:
-            raise RuntimeError(
-                "I can't send you direct messages anymore. Enable DMs and run the command again."
-            ) from exc
-        except discord.HTTPException as exc:
-            raise RuntimeError(f"Failed to send DM: {exc}") from exc
 
     async def _ask(
         self,
@@ -2353,116 +2346,46 @@ class QuestSessionBase:
             referee_display=self.cog._lookup_user_display(self.guild.id, quest.referee_id),
         )
 
-    async def _update_preview(
-        self,
-        quest: Quest,
-        *,
-        header: Optional[str] = None,
-        view: Optional[discord.ui.View] = None,
-    ) -> None:
-        embed = self._build_preview_embed(quest)
-        content = header or "**Current quest preview:**"
-        if self._preview_message is None:
-            self._preview_message = await self._safe_send(
-                content,
-                embed=embed,
-                view=view,
-            )
-            return
-        try:
-            await self._preview_message.edit(
-                content=content,
-                embed=embed,
-                view=view,
-            )
-        except discord.HTTPException:
-            self._preview_message = await self._safe_send(
-                content,
-                embed=embed,
-                view=view,
-            )
-
     async def send_completion_summary(self, quest: Quest, note: str) -> None:
         await self._safe_send(note, embed=self._build_preview_embed(quest))
 
-    async def _flash_message(
-        self,
-        interaction: discord.Interaction,
-        message: str,
-        *,
-        delay: float = 5.0,
-    ) -> None:
-        try:
-            if interaction.response.is_done():
-                await interaction.followup.send(message, ephemeral=True)
-            else:
-                await interaction.response.send_message(message, ephemeral=True)
-        except Exception:
-            with suppress(Exception):
-                await self._safe_send(message)
-            return
-        try:
-            await asyncio.sleep(delay)
-            if interaction.followup:
-                await interaction.delete_original_response()
-        except Exception:
-            pass
 
-    def _parse_datetime(self, value: str) -> Optional[datetime]:
-        text = value.strip()
-        if not text:
-            return None
-        if text.isdigit():
-            try:
-                return datetime.fromtimestamp(int(text), tz=timezone.utc)
-            except (OverflowError, ValueError):
-                return None
-        return None
-
-    def _parse_duration(self, value: str) -> Optional[timedelta]:
-        text = value.strip()
-        if not text:
-            return None
-        try:
-            hours_float = float(text)
-        except ValueError:
-            return None
-        if hours_float <= 0:
-            return None
-        return timedelta(hours=hours_float)
-
-
-class QuestWizardContext:
+class QuestWizardContext(
+    PreviewWizardContext[Quest, QuestCreationResult | QuestUpdateResult]
+):
     def __init__(
         self,
         session: "QuestSessionBase",
         quest: Quest,
         mode: Literal["create", "update"],
-        timeout: int = 600,
+        *,
+        timeout: Optional[int] = None,
     ) -> None:
-        self.session = session
-        self.quest = quest
-        self.mode = mode
-        self.timeout = timeout
-        loop = asyncio.get_running_loop()
-        self.future: asyncio.Future = loop.create_future()
+        super().__init__(
+            session,
+            quest,
+            mode=mode,
+            timeout=timeout or (600 if mode == "create" else 300),
+        )
 
-    def resolve(self, result: Any) -> None:
-        if not self.future.done():
-            self.future.set_result(result)
+    @property
+    def quest(self) -> Quest:
+        return self.payload
 
 
-class QuestWizardView(discord.ui.View):
+class QuestWizardView(
+    PreviewWizardView[Quest, QuestCreationResult | QuestUpdateResult]
+):
     def __init__(self, context: QuestWizardContext) -> None:
-        super().__init__(timeout=context.timeout)
-        self.context = context
+        super().__init__(context)
         if context.mode == "create":
             self.submit_button.label = "Save Draft"
         else:
             self.submit_button.label = "Save Changes"
-        self._all_items: list[discord.ui.Item] = list(self.children)
 
-    def _build_result(self, success: bool, error: Optional[str] = None) -> Any:
+    def build_result(
+        self, success: bool, *, error: Optional[str] = None
+    ) -> QuestCreationResult | QuestUpdateResult:
         if self.context.mode == "create":
             return QuestCreationResult(
                 success,
@@ -2474,23 +2397,6 @@ class QuestWizardView(discord.ui.View):
             quest=self.context.quest if success else None,
             error=error,
         )
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.context.session.member.id:
-            await interaction.response.send_message(
-                "This wizard is controlled by someone else.", ephemeral=True
-            )
-            return False
-        return True
-
-    async def on_timeout(self) -> None:
-        result = self._build_result(False, "Wizard timed out. Start again when ready.")
-        self.context.resolve(result)
-        try:
-            await self.context.session._update_preview(self.context.quest, view=None)
-        except Exception:
-            pass
-        self.stop()
 
     @discord.ui.button(label="Title", style=discord.ButtonStyle.primary)
     async def edit_title(  # type: ignore[override]
@@ -2609,7 +2515,7 @@ class QuestWizardView(discord.ui.View):
             item.disabled = value
 
 
-class _BaseQuestModal(discord.ui.Modal):
+class _BaseQuestModal(ContextAwareModal[Quest, QuestCreationResult | QuestUpdateResult]):
     def __init__(
         self,
         context: QuestWizardContext,
@@ -2617,9 +2523,7 @@ class _BaseQuestModal(discord.ui.Modal):
         *,
         title: str,
     ) -> None:
-        super().__init__(title=title)
-        self.context = context
-        self.view = view
+        super().__init__(context, view, title=title)
 
 
 class QuestTitleModal(_BaseQuestModal):
@@ -2679,7 +2583,7 @@ class QuestStartModal(_BaseQuestModal):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         value = self.start_input.value.strip()
-        parsed = self.context.session._parse_datetime(value)
+        parsed = parse_epoch_seconds(value)
         if parsed is None:
             await self.context.session._flash_message(
                 interaction,
@@ -2710,7 +2614,7 @@ class QuestDurationModal(_BaseQuestModal):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         value = self.duration_input.value.strip()
-        parsed = self.context.session._parse_duration(value)
+        parsed = parse_positive_hours(value)
         if parsed is None:
             await self.context.session._flash_message(
                 interaction,

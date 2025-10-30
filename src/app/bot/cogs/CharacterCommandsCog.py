@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from contextlib import suppress
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
-from urllib.parse import urlparse
-
+from typing import Callable, Dict, List, Optional
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -14,6 +13,15 @@ from discord.ext import commands
 from app.bot.services import guild_settings_store
 from app.bot.utils.log_stream import send_demo_log
 from app.bot.cogs._staff_utils import is_allowed_staff
+from app.bot.ui.wizards import (
+    ContextAwareModal,
+    PreviewWizardContext,
+    PreviewWizardView,
+    WizardSessionBase,
+    sanitize_comma_separated,
+    validate_http_url,
+    validate_length,
+)
 from app.domain.models.CharacterModel import Character, CharacterRole
 from app.domain.models.EntityIDModel import CharacterID, UserID
 from app.domain.models.UserModel import User
@@ -728,7 +736,7 @@ class CharacterCommandsCog(commands.Cog):
         return await self._character_autocomplete(interaction, current)
 
 
-class CharacterSessionBase:
+class CharacterSessionBase(WizardSessionBase):
     def __init__(
         self,
         cog: "CharacterCommandsCog",
@@ -736,12 +744,14 @@ class CharacterSessionBase:
         member: discord.Member,
         dm_channel: discord.DMChannel,
     ) -> None:
+        super().__init__(
+            bot=cog.bot,
+            guild=guild,
+            member=member,
+            dm_channel=dm_channel,
+            timeout=180,
+        )
         self.cog = cog
-        self.bot = cog.bot
-        self.guild = guild
-        self.member = member
-        self.dm = dm_channel
-        self.timeout = 180
         self.data: Dict[str, Optional[str]] = {}
 
     async def _safe_send(
@@ -752,13 +762,13 @@ class CharacterSessionBase:
         view: Optional[discord.ui.View] = None,
     ) -> discord.Message:
         try:
-            return await self.dm.send(content=content, embed=embed, view=view)
-        except discord.Forbidden as exc:
-            raise SessionMessagingError(
-                "I can't send you direct messages anymore. Enable DMs and run the command again."
-            ) from exc
-        except discord.HTTPException as exc:
-            raise SessionMessagingError(f"Failed to send DM: {exc}") from exc
+            return await super()._safe_send(
+                content,
+                embed=embed,
+                view=view,
+            )
+        except RuntimeError as exc:
+            raise SessionMessagingError(str(exc)) from exc
 
     async def _ask(
         self,
@@ -847,39 +857,41 @@ class CharacterSessionBase:
 
     @staticmethod
     def _validate_name(value: str) -> str:
-        name = value.strip()
-        if not 2 <= len(name) <= 64:
-            raise ValueError("Character name must be between 2 and 64 characters long.")
-        return name
+        return validate_length(value, minimum=2, maximum=64, field="Character name")
 
     @staticmethod
     def _validate_url(value: str) -> str:
-        url = value.strip()
-        parsed = urlparse(url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("Please provide a valid URL (http/https).")
-        return url
+        return validate_http_url(value)
 
     @staticmethod
     def _validate_description(value: str) -> str:
-        text = value.strip()
-        if len(text) > 500:
-            raise ValueError("Description must be 500 characters or fewer.")
-        return text
+        return validate_length(value, maximum=500, field="Description")
 
     @staticmethod
     def _validate_notes(value: str) -> str:
-        text = value.strip()
-        if len(text) > 500:
-            raise ValueError("Notes must be 500 characters or fewer.")
-        return text
+        return validate_length(value, maximum=500, field="Notes")
 
     @staticmethod
     def _sanitize_tags(value: str) -> str:
-        tags = [tag.strip() for tag in value.split(",") if tag.strip()]
-        if len(tags) > 20:
-            raise ValueError("Please provide 20 or fewer tags.")
+        tags = sanitize_comma_separated(value, max_items=20)
         return ", ".join(tags)
+
+
+@dataclass
+class CharacterDraft:
+    name: Optional[str] = None
+    ddb_link: Optional[str] = None
+    character_thread_link: Optional[str] = None
+    token_link: Optional[str] = None
+    art_link: Optional[str] = None
+    description: Optional[str] = None
+    notes: Optional[str] = None
+    tags: List[str] = field(default_factory=list)
+
+    def display_tags(self) -> str:
+        return ", ".join(self.tags)
+
+
 @dataclass
 class CharacterCreationResult:
     success: bool
@@ -968,110 +980,54 @@ class CharacterCreationSession(CharacterSessionBase):
         dm_channel: discord.DMChannel,
     ) -> None:
         super().__init__(cog, guild, member, dm_channel)
+        self.draft = CharacterDraft()
+
+    def _build_preview_embed(self, draft: CharacterDraft) -> discord.Embed:
+        embed = self.cog._build_character_embed(
+            name=draft.name or "Unnamed Character",
+            ddb_link=draft.ddb_link,
+            character_thread_link=draft.character_thread_link,
+            token_link=draft.token_link,
+            art_link=draft.art_link,
+            description=draft.description,
+            tags=draft.tags,
+            status=CharacterRole.ACTIVE,
+            updated_at=datetime.now(timezone.utc),
+        )
+        if draft.notes:
+            embed.add_field(
+                name="Private Notes",
+                value=draft.notes,
+                inline=False,
+            )
+        return embed
 
     async def run(self) -> CharacterCreationResult:
+        context = CharacterWizardContext(self)
+        view = CharacterWizardView(context)
+        header = (
+            "**Character Draft Preview**\n"
+            "Use the buttons below to update fields. "
+            "Name, sheet, thread, token, and art links are required."
+        )
         try:
-            await self._safe_send(
-                "Hello! Let's create your character. I'll ask a few questions — type `cancel` at any time to stop."
-            )
-
-            self.data["name"] = await self._ask(
-                "**Step 1:** What's your character's name?",
-                required=True,
-                validator=self._validate_name,
-            )
-            self.data["ddb_link"] = await self._ask(
-                "**Step 2:** Share the D&D Beyond (or sheet) link.",
-                required=True,
-                validator=self._validate_url,
-            )
-            self.data["character_thread_link"] = await self._ask(
-                "**Step 3:** What's the forum/thread link for this character?",
-                required=True,
-                validator=self._validate_url,
-            )
-            self.data["token_link"] = await self._ask(
-                "**Step 4:** Provide a token image link.",
-                required=True,
-                validator=self._validate_url,
-            )
-            self.data["art_link"] = await self._ask(
-                "**Step 5:** Provide a character art link.",
-                required=True,
-                validator=self._validate_url,
-            )
-            self.data["description"] = await self._ask(
-                "**Step 6:** Add an optional short description (max 500 characters).",
-                required=False,
-                validator=self._validate_description,
-                allow_skip=True,
-            )
-            self.data["notes"] = await self._ask(
-                "**Step 7:** Any private notes for staff? (max 500 characters).",
-                required=False,
-                validator=self._validate_notes,
-                allow_skip=True,
-            )
-            self.data["tags"] = await self._ask(
-                "**Step 8:** Optional tags (comma separated).",
-                required=False,
-                validator=self._sanitize_tags,
-                allow_skip=True,
-            )
-        except SessionCancelled:
-            await self._safe_send("Character creation cancelled. No data was saved.")
-            return CharacterCreationResult(False, error="Character creation cancelled.")
-        except SessionTimeout:
-            await self._safe_send(
-                "Timed out waiting for a response. Run `/character create` again when you're ready."
-            )
-            return CharacterCreationResult(
-                False,
-                error="Timed out waiting for a response. Run `/character create` again when you're ready.",
-            )
-        except SessionMessagingError as exc:
-            return CharacterCreationResult(False, error=exc.message)
-
-        tags = self._parse_tags()
-        preview_embed = self._build_embed_from_data(status=CharacterRole.ACTIVE)
-
-        try:
-            await self._safe_send(
-                "Here's a preview of what will be posted in the character channel:",
-                embed=preview_embed,
-            )
-            notes = self.data.get("notes")
-            if notes:
-                await self._safe_send(
-                    "**Private notes (not shared publicly):**\n" + notes
-                )
-
-            view = CharacterConfirmView(self.member)
-            message = await self._safe_send(
-                "Confirm below to create the character, or cancel to stop.",
+            await self._update_preview(
+                self.draft,
+                header=header,
                 view=view,
             )
-        except SessionMessagingError as exc:
-            return CharacterCreationResult(False, error=exc.message)
+            result: CharacterCreationResult = await context.future
+        finally:
+            if self._preview_message is not None:
+                with suppress(Exception):
+                    await self._preview_message.edit(view=None)
+        if not result.success:
+            return result
+        return await self._complete_creation()
 
-        await view.wait()
+    async def _complete_creation(self) -> CharacterCreationResult:
         try:
-            await message.edit(view=None)
-        except (discord.HTTPException, AttributeError):
-            pass
-
-        if view.result != "confirm":
-            if view.result == "cancel":
-                return CharacterCreationResult(
-                    False, error="Character creation cancelled."
-                )
-            return CharacterCreationResult(
-                False,
-                error="Confirmation timed out. Run `/character create` again when you're ready.",
-            )
-
-        try:
-            return await self._persist_character(tags)
+            return await self._persist_character()
         except SessionMessagingError as exc:
             return CharacterCreationResult(False, error=exc.message)
         except Exception as exc:  # pragma: no cover - defensive
@@ -1085,7 +1041,372 @@ class CharacterCreationSession(CharacterSessionBase):
                 error="An unexpected error occurred while creating your character. Please try again later.",
             )
 
-    async def _persist_character(self, tags: List[str]) -> CharacterCreationResult:
+
+class CharacterWizardContext(
+    PreviewWizardContext[CharacterDraft, CharacterCreationResult]
+):
+    def __init__(self, session: CharacterCreationSession) -> None:
+        super().__init__(session, session.draft, mode="create", timeout=300)
+
+    @property
+    def draft(self) -> CharacterDraft:
+        return self.payload
+
+
+class CharacterWizardView(
+    PreviewWizardView[CharacterDraft, CharacterCreationResult]
+):
+    def __init__(self, context: CharacterWizardContext) -> None:
+        super().__init__(context)
+        self.submit_button.label = "Create Character"
+
+    def build_result(
+        self, success: bool, *, error: Optional[str] = None
+    ) -> CharacterCreationResult:
+        name = self.context.draft.name if success else None
+        return CharacterCreationResult(success, character_name=name, error=error)
+
+    @discord.ui.button(label="Name", style=discord.ButtonStyle.primary)
+    async def edit_name(  # type: ignore[override]
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        try:
+            await interaction.response.send_modal(
+                CharacterNameModal(self.context, self)
+            )
+        except discord.NotFound:
+            return
+
+    @discord.ui.button(label="Sheet", style=discord.ButtonStyle.primary)
+    async def edit_sheet(  # type: ignore[override]
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        try:
+            await interaction.response.send_modal(
+                CharacterUrlModal(
+                    self.context,
+                    self,
+                    field="ddb_link",
+                    title="Character Sheet",
+                    label="D&D Beyond or sheet URL",
+                )
+            )
+        except discord.NotFound:
+            return
+
+    @discord.ui.button(label="Thread", style=discord.ButtonStyle.primary)
+    async def edit_thread(  # type: ignore[override]
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        try:
+            await interaction.response.send_modal(
+                CharacterUrlModal(
+                    self.context,
+                    self,
+                    field="character_thread_link",
+                    title="Character Thread",
+                    label="Forum or thread URL",
+                )
+            )
+        except discord.NotFound:
+            return
+
+    @discord.ui.button(label="Token", style=discord.ButtonStyle.secondary)
+    async def edit_token(  # type: ignore[override]
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        try:
+            await interaction.response.send_modal(
+                CharacterUrlModal(
+                    self.context,
+                    self,
+                    field="token_link",
+                    title="Token Image",
+                    label="Token image URL",
+                )
+            )
+        except discord.NotFound:
+            return
+
+    @discord.ui.button(label="Art", style=discord.ButtonStyle.secondary)
+    async def edit_art(  # type: ignore[override]
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        try:
+            await interaction.response.send_modal(
+                CharacterUrlModal(
+                    self.context,
+                    self,
+                    field="art_link",
+                    title="Character Art",
+                    label="Character art URL",
+                )
+            )
+        except discord.NotFound:
+            return
+
+    @discord.ui.button(label="Description", style=discord.ButtonStyle.secondary)
+    async def edit_description(  # type: ignore[override]
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        try:
+            await interaction.response.send_modal(
+                CharacterOptionalModal(
+                    self.context,
+                    self,
+                    field="description",
+                    title="Character Description",
+                    label="Short description (max 500 characters)",
+                    validator=self.context.session._validate_description,
+                )
+            )
+        except discord.NotFound:
+            return
+
+    @discord.ui.button(label="Notes", style=discord.ButtonStyle.secondary)
+    async def edit_notes(  # type: ignore[override]
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        try:
+            await interaction.response.send_modal(
+                CharacterOptionalModal(
+                    self.context,
+                    self,
+                    field="notes",
+                    title="Private Notes",
+                    label="Private notes for staff (max 500 characters)",
+                    validator=self.context.session._validate_notes,
+                )
+            )
+        except discord.NotFound:
+            return
+
+    @discord.ui.button(label="Tags", style=discord.ButtonStyle.secondary)
+    async def edit_tags(  # type: ignore[override]
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        try:
+            await interaction.response.send_modal(
+                CharacterTagsModal(self.context, self)
+            )
+        except discord.NotFound:
+            return
+
+    @discord.ui.button(label="Refresh Preview", style=discord.ButtonStyle.secondary)
+    async def refresh_preview(  # type: ignore[override]
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await interaction.response.defer()
+        await self.context.session._update_preview(
+            self.context.draft,
+            view=self,
+        )
+
+    @discord.ui.button(style=discord.ButtonStyle.success)
+    async def submit_button(  # type: ignore[override]
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        draft = self.context.draft
+        missing: list[str] = []
+        if not draft.name:
+            missing.append("name")
+        if not draft.ddb_link:
+            missing.append("sheet link")
+        if not draft.character_thread_link:
+            missing.append("thread link")
+        if not draft.token_link:
+            missing.append("token link")
+        if not draft.art_link:
+            missing.append("art link")
+        if missing:
+            await self.context.session._flash_message(
+                interaction,
+                f"Please set the {', '.join(missing)} before creating your character.",
+            )
+            return
+
+        await interaction.response.defer()
+        result = self.build_result(True)
+        self.context.resolve(result)
+        self._set_disabled(True)
+        await self.context.session._update_preview(
+            self.context.draft,
+            view=self,
+        )
+        self.stop()
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger)
+    async def cancel_button(  # type: ignore[override]
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await interaction.response.defer()
+        result = self.build_result(False, error="Character creation cancelled.")
+        self.context.resolve(result)
+        self._set_disabled(True)
+        await self.context.session._update_preview(
+            self.context.draft,
+            view=self,
+        )
+        self.stop()
+
+
+class _CharacterFieldModal(
+    ContextAwareModal[CharacterDraft, CharacterCreationResult]
+):
+    def __init__(
+        self,
+        context: CharacterWizardContext,
+        view: CharacterWizardView,
+        *,
+        field: str,
+        title: str,
+        label: str,
+        default: str,
+        required: bool = True,
+        placeholder: Optional[str] = None,
+        max_length: int = 200,
+        style: discord.TextStyle = discord.TextStyle.short,
+        validator: Optional[Callable[[str], str]] = None,
+    ) -> None:
+        super().__init__(context, view, title=title)
+        self.field = field
+        self.required = required
+        self.validator = validator
+        self.input = discord.ui.TextInput(
+            label=label,
+            default=default,
+            placeholder=placeholder,
+            required=False,
+            max_length=max_length,
+            style=style,
+        )
+        self.add_item(self.input)
+
+    def _normalize(self, value: str) -> Optional[str]:
+        if not value:
+            if self.required:
+                raise ValueError("Please provide a value before continuing.")
+            return None
+        if self.validator is not None:
+            return self.validator(value)
+        return value
+
+    def apply(self, value: Optional[str]) -> None:
+        setattr(self.context.draft, self.field, value)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        raw = self.input.value.strip()
+        try:
+            normalized = self._normalize(raw)
+        except ValueError as exc:
+            await self.context.session._flash_message(interaction, str(exc))
+            return
+        self.apply(normalized)
+        await interaction.response.defer()
+        await self.context.session._update_preview(
+            self.context.draft,
+            view=self.view,
+        )
+
+
+class CharacterNameModal(_CharacterFieldModal):
+    def __init__(self, context: CharacterWizardContext, view: CharacterWizardView):
+        super().__init__(
+            context,
+            view,
+            field="name",
+            title="Character Name",
+            label="Character Name",
+            default=context.draft.name or "",
+            max_length=64,
+            validator=context.session._validate_name,
+        )
+
+
+class CharacterUrlModal(_CharacterFieldModal):
+    def __init__(
+        self,
+        context: CharacterWizardContext,
+        view: CharacterWizardView,
+        *,
+        field: str,
+        title: str,
+        label: str,
+    ) -> None:
+        super().__init__(
+            context,
+            view,
+            field=field,
+            title=title,
+            label=label,
+            default=getattr(context.draft, field) or "",
+            max_length=250,
+            placeholder="Must start with http or https.",
+            validator=context.session._validate_url,
+        )
+
+
+class CharacterOptionalModal(_CharacterFieldModal):
+    def __init__(
+        self,
+        context: CharacterWizardContext,
+        view: CharacterWizardView,
+        *,
+        field: str,
+        title: str,
+        label: str,
+        validator,
+    ) -> None:
+        super().__init__(
+            context,
+            view,
+            field=field,
+            title=title,
+            label=label,
+            default=getattr(context.draft, field) or "",
+            required=False,
+            placeholder="Leave blank to clear this field.",
+            max_length=500,
+            style=discord.TextStyle.paragraph,
+            validator=validator,
+        )
+
+
+class CharacterTagsModal(
+    ContextAwareModal[CharacterDraft, CharacterCreationResult]
+):
+    def __init__(self, context: CharacterWizardContext, view: CharacterWizardView) -> None:
+        super().__init__(context, view, title="Character Tags")
+        self.tags_input = discord.ui.TextInput(
+            label="Tags (comma separated)",
+            default=context.draft.display_tags(),
+            placeholder="Example: healer, support",
+            required=False,
+            max_length=200,
+        )
+        self.add_item(self.tags_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        raw = self.tags_input.value.strip()
+        if not raw:
+            tags: list[str] = []
+        else:
+            try:
+                tags = sanitize_comma_separated(raw, max_items=20)
+            except ValueError as exc:
+                await self.context.session._flash_message(
+                    interaction,
+                    str(exc),
+                )
+                return
+        self.context.draft.tags = tags
+        await interaction.response.defer()
+        await self.context.session._update_preview(
+            self.context.draft,
+            view=self.view,
+        )
+
+    async def _persist_character(self) -> CharacterCreationResult:
         channel, channel_error = self._resolve_character_channel()
         if channel is None:
             await self._safe_send(channel_error)
@@ -1107,16 +1428,17 @@ class CharacterCreationSession(CharacterSessionBase):
             user.enable_player()
 
         char_id = self.cog._next_character_id(self.guild.id)
-        description = self._normalize_optional(self.data.get("description"))
-        notes = self._normalize_optional(self.data.get("notes"))
+        description = self._normalize_optional(self.draft.description)
+        notes = self._normalize_optional(self.draft.notes)
+        tags = list(self.draft.tags)
         character = Character(
             character_id=str(char_id),
             owner_id=user.user_id,
-            name=self.data["name"] or "",
-            ddb_link=self.data["ddb_link"] or "",
-            character_thread_link=self.data["character_thread_link"] or "",
-            token_link=self.data["token_link"] or "",
-            art_link=self.data["art_link"] or "",
+            name=self.draft.name or "",
+            ddb_link=self.draft.ddb_link or "",
+            character_thread_link=self.draft.character_thread_link or "",
+            token_link=self.draft.token_link or "",
+            art_link=self.draft.art_link or "",
             description=description,
             notes=notes,
             tags=tags,
