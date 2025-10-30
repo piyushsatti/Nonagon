@@ -26,7 +26,7 @@ class Nonagon(commands.Bot):
 
     def __init__(self, intents: discord.Intents):
         super().__init__(
-            command_prefix=commands.when_mentioned_or("n!"), intents=intents
+            command_prefix=commands.when_mentioned_or("n.", "n!"), intents=intents
         )
         self.guild_data: dict[int, dict[str, Any]] = {}
         self.dirty_data: asyncio.Queue[tuple[int, int]] = asyncio.Queue()
@@ -85,9 +85,8 @@ class Nonagon(commands.Bot):
         await super().setup_hook()
 
     # Called to login and connect the bot to Discord
-    async def start(self, BOT_TOKEN):
-        async def _idle_forever(reason_template: str, *args: Any) -> None:
-            reason = reason_template % args if args else reason_template
+    async def start(self, token, *, reconnect: bool = False):
+        async def _idle_forever(reason: str) -> None:
             logger.error(
                 "%s. Bot will remain idle until restarted with valid credentials.",
                 reason,
@@ -95,27 +94,31 @@ class Nonagon(commands.Bot):
             while True:
                 await asyncio.sleep(30)
 
-        normalized = (BOT_TOKEN or "").strip()
+        normalized = (token or "").strip()
         placeholders = {"", "replace_me"}
 
         if normalized.lower() in placeholders:
-            logging.error("BOT_TOKEN is missing or still set to the placeholder value.")
-            raise SystemExit(1)
+            await _idle_forever(
+                "BOT_TOKEN is missing or still set to the placeholder value"
+            )
+            return
 
         try:
-            await super().start(normalized)
+            await super().start(normalized, reconnect=reconnect)
         except discord.LoginFailure as exc:
-            await _idle_forever("Discord login failed: %s", exc)
+            await _idle_forever(f"Discord login failed: {exc}")
         except discord.HTTPException as exc:
-            await _idle_forever("Discord HTTP error during startup: %s", exc)
+            await _idle_forever(f"Discord HTTP error during startup: {exc}")
         except Exception as exc:  # pragma: no cover - defensive fallback
-            await _idle_forever("Unexpected error during startup: %s", exc)
+            await _idle_forever(f"Unexpected error during startup: {exc}")
 
     # Called when the bot is ready
     async def on_ready(self):
         await self._load_cache()
         tree_commands = [cmd.qualified_name for cmd in self.tree.get_commands()]
-        logger.info("Logged in as %s (ID: %s)", self.user, self.user.id)
+        user_repr = str(self.user) if self.user is not None else "<no-user>"
+        user_id = getattr(self.user, "id", "<no-id>")
+        logger.info("Logged in as %s (ID: %s)", user_repr, user_id)
         logger.info("Loaded cogs: %s", ", ".join(sorted(self.cogs.keys())))
         logger.info("Slash commands: %s", ", ".join(sorted(tree_commands)))
 
@@ -172,14 +175,16 @@ class Nonagon(commands.Bot):
             if not to_flush:
                 continue
 
-            for (gid, uid), user in to_flush.items():
+            # Limit concurrency to avoid thread pool contention
+            semaphore = asyncio.Semaphore(10)  # adjust limit as needed
+
+            async def flush_user(gid, uid, user):
                 guild_entry = self.guild_data.get(gid)
                 if guild_entry is None:
                     logger.debug(
                         "Skipping flush for gid=%s uid=%s (guild missing)", gid, uid
                     )
-                    continue
-
+                    return
                 try:
                     user.guild_id = gid
                     if BOT_FLUSH_VIA_ADAPTER:
@@ -208,6 +213,7 @@ class Nonagon(commands.Bot):
                         user.user_id,
                         exc,
                     )
+
             # Quietly completes; detailed logging is handled by exception paths above.
 
     async def _sync_application_commands(self) -> None:
@@ -329,20 +335,42 @@ class Nonagon(commands.Bot):
 
 if __name__ == "__main__":
 
-    logging.basicConfig(level=logging.INFO)
+    # Configure deterministic logging: write to repo-local ./logs by default
+    import os
 
-    log_dir = Path("/app/logs")
+    default_log_dir = Path.cwd() / "logs"
+    log_dir = Path(os.getenv("LOG_DIR") or default_log_dir)
+
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
     except Exception as exc:  # pragma: no cover - defensive logging
+        # Fall back to stdout-only logging if directory can't be created
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s %(message)s",
+            force=True,
+        )
         logger.warning("Unable to create log directory %s: %s", log_dir, exc)
     else:
-        file_handler = logging.FileHandler(log_dir / "bot.log", mode="w")
+        # File handler (append so logs survive restarts) + stream handler
+        file_handler = logging.FileHandler(log_dir / "bot.log", mode="a", encoding="utf-8")
         file_handler.setLevel(logging.INFO)
         file_handler.setFormatter(
             logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
         )
-        logging.getLogger().addHandler(file_handler)
+
+        stream_handler = logging.StreamHandler()
+        stream_handler.setLevel(logging.INFO)
+        stream_handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+        )
+
+        # Configure root logger with both handlers
+        logging.basicConfig(
+            level=logging.INFO,
+            handlers=[file_handler, stream_handler],
+            force=True,
+        )
 
     intents = discord.Intents.default()
     intents.message_content = True
