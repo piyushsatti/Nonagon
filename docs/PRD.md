@@ -108,6 +108,14 @@ Deliver a guild-friendly Discord companion that streamlines the full quest lifec
   - [x] Implement `_quest_schedule_loop` polling every 60 seconds.
   - [x] Add `_announce_quest_now` with ping-role support.
   - [x] Extend `/setup quest` to configure announcement channel + optional ping role.
+  - Note: `/setup sync` was removed from the slash command surface. Syncing is now owner-only:
+    - Prefix owner commands: `n!sync` (current guild) and `n!syncall` (all guilds).
+    - Extension manager `/sync` (guild-scoped) is available to owners.
+  - `/setup server_tag` was renamed to `/setup servertag`. When enabling, you must supply both a role and a pattern (case-insensitive substring match against member nick/display/name). Stored keys remain `server_tag_*` for backwards compatibility.
+    - Example: `/setup servertag enabled:true role:@ServerTag pattern:"[GuildTag]"`
+  - `/setup boosters` now requires a role when enabling (no interactive ask flow).
+    - Example: `/setup boosters enabled:true role:@Boosters`
+
 
 #### Story EP1-S3 - Quest Maintenance Commands
 - **Status**: Complete

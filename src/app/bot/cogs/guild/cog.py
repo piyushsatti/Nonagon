@@ -26,8 +26,8 @@ class GuildCommandsCog(commands.Cog):
         embed = discord.Embed(
             title="Nonagon Guild Commands",
             description=(
-                "Configuration has moved to `/setup`. Try `/setup help` for the full list. "
-                "This legacy group still offers quick stats."
+                "Configuration and setup live under `/setup`. Run `/setup help` to see setup options. "
+                "This legacy group still provides quick, read-only guild stats."
             ),
             colour=discord.Colour.blurple(),
         )

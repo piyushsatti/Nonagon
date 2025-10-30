@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Dict, Optional, cast
 
 import discord
 from discord import app_commands
@@ -231,7 +231,7 @@ class SetupCommandsCog(commands.Cog):
         embed = discord.Embed(
             title="Nonagon Setup Commands",
             colour=discord.Colour.blurple(),
-            description="Configure channels, roles, and sync utilities for this guild.",
+            description="Configure channels, roles, and simple utilities for this guild. See `/setup servertag` and `/setup boosters` for role-based options.",
         )
         embed.add_field(
             name="/setup quest",
@@ -254,13 +254,13 @@ class SetupCommandsCog(commands.Cog):
             inline=False,
         )
         embed.add_field(
-            name="/setup server_tag",
-            value="Enable/disable server tag tracking and optional mention role.",
+            name="/setup servertag",
+            value="Enable/disable server-tag tracking and choose the role used to mark tagged members.",
             inline=False,
         )
         embed.add_field(
             name="/setup boosters",
-            value="Toggle booster tracking and optionally store a booster role.",
+            value="Toggle booster tracking and set the role used to identify boosters.",
             inline=False,
         )
         embed.add_field(
@@ -278,11 +278,7 @@ class SetupCommandsCog(commands.Cog):
             value="Clear all stored settings (does not delete Discord resources).",
             inline=False,
         )
-        embed.add_field(
-            name="/setup sync",
-            value="Force a slash-command sync for this guild (rapid iteration helper).",
-            inline=False,
-        )
+        # `/setup sync` intentionally removed from help; sync is owner-only now.
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -322,22 +318,6 @@ class SetupCommandsCog(commands.Cog):
         else:
             message = "No stored configuration found for this guild."
         await interaction.response.send_message(message, ephemeral=True)
-
-    @setup.command(name="sync", description="Force slash-command sync for this guild.")
-    @app_commands.guild_only()
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def setup_sync(self, interaction: discord.Interaction) -> None:
-        if interaction.guild is None:
-            await interaction.response.send_message(
-                "This command can only be used inside a guild.", ephemeral=True
-            )
-            return
-
-        # Disabled: sync moved to owner diagnostics and extension manager.
-        await interaction.response.send_message(
-            "The `/setup sync` command has been disabled. Bot owner can run `n!sync` (current guild) or `n!syncall` (all guilds).",
-            ephemeral=True,
-        )
 
     @setup.command(
         name="refresh",
@@ -469,7 +449,7 @@ class SetupCommandsCog(commands.Cog):
         embed = discord.Embed(
             title="Quest settings updated",
             colour=discord.Colour.blurple(),
-            timestamp=config.get("updated_at"),
+            timestamp=cast(Optional[datetime], config.get("updated_at")),
         )
         embed.add_field(
             name="Announcement channel",
@@ -518,7 +498,7 @@ class SetupCommandsCog(commands.Cog):
         embed = discord.Embed(
             title="Summary channel updated",
             colour=discord.Colour.blurple(),
-            timestamp=config.get("updated_at"),
+            timestamp=cast(Optional[datetime], config.get("updated_at")),
             description=f"Summaries will be posted in {summary_channel.mention}.",
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
@@ -565,7 +545,7 @@ class SetupCommandsCog(commands.Cog):
         embed = discord.Embed(
             title="Character channel updated",
             colour=discord.Colour.blurple(),
-            timestamp=config.get("updated_at"),
+            timestamp=cast(Optional[datetime], config.get("updated_at")),
             description=(
                 f"New characters will be announced in {character_channel.mention}. "
                 "Ensure I keep **Create Private Threads** permission in this channel."
@@ -608,32 +588,28 @@ class SetupCommandsCog(commands.Cog):
         embed = discord.Embed(
             title="Logging channel updated",
             colour=discord.Colour.blurple(),
-            timestamp=config.get("updated_at"),
+            timestamp=cast(Optional[datetime], config.get("updated_at")),
             description=f"Diagnostics will be sent to {log_channel.mention}.",
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @setup.command(
-        name="server_tag",
-        description="Enable or disable server-tag tracking and optional mention role.",
+        name="servertag",
+        description="Enable or disable server-tag tracking and choose the role used to mark tagged members.",
     )
     @app_commands.describe(
         enabled="Set to False to disable server-tag tracking entirely.",
-        ask_to_select_role="Set True to be reminded to choose a role if none is provided.",
-        role="Role that marks server-tagged members (optional).",
-        pattern="Fallback text searched in nicknames/display names (optional).",
-        mention_role="Role to mention when referencing server-tagged members (optional).",
+        role="Role that marks server-tagged members (required when enabling).",
+        pattern="Fallback text searched in nicknames/display names (required when enabling).",
     )
     @app_commands.guild_only()
     @app_commands.checks.has_permissions(manage_guild=True)
-    async def setup_server_tag(
+    async def setup_servertag(
         self,
         interaction: discord.Interaction,
         enabled: bool,
-        ask_to_select_role: Optional[bool] = False,
-        role: Optional[discord.Role] = None,
-        pattern: Optional[str] = None,
-        mention_role: Optional[discord.Role] = None,
+        role: discord.Role,
+        pattern: str,
     ) -> None:
         if interaction.guild is None:
             await interaction.response.send_message(
@@ -662,30 +638,22 @@ class SetupCommandsCog(commands.Cog):
             )
             return
 
-        if role is None and ask_to_select_role:
-            await interaction.followup.send(
-                "Please rerun `/setup server_tag` and choose a role to mark server-tagged members.",
-                ephemeral=True,
-            )
-            return
-
+        # role and pattern are required by the command signature when enabling
         config = self._save_settings(
             interaction.guild,
             interaction.user.id,
             {
                 "server_tag_enabled": True,
-                "server_tag_role_id": role.id if role else None,
-                "server_tag_role_name": role.name if role else None,
-                "server_tag_pattern": (pattern or "").strip() or None,
-                "server_tag_mention_role_id": mention_role.id if mention_role else None,
-                "server_tag_mention_role_name": mention_role.name if mention_role else None,
+                "server_tag_role_id": role.id,
+                "server_tag_role_name": role.name,
+                "server_tag_pattern": pattern.strip() or None,
             },
         )
 
         embed = discord.Embed(
             title="Server-tag settings updated",
             colour=discord.Colour.blurple(),
-            timestamp=config.get("updated_at"),
+            timestamp=cast(Optional[datetime], config.get("updated_at")),
         )
         embed.add_field(
             name="Tag role",
@@ -694,24 +662,18 @@ class SetupCommandsCog(commands.Cog):
         )
         embed.add_field(
             name="Pattern",
-            value=f"`{pattern}`" if pattern else "Not set",
-            inline=False,
-        )
-        embed.add_field(
-            name="Mention role",
-            value=mention_role.mention if mention_role else "Not set",
+            value=f"`{pattern}`",
             inline=False,
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @setup.command(
         name="boosters",
-        description="Enable or disable booster tracking and optional booster role.",
+        description="Enable or disable booster tracking and set the role used to identify boosters.",
     )
     @app_commands.describe(
         enabled="Set to False to disable booster tracking.",
-        ask_to_select_role="Set True to be reminded to choose a booster role if none is provided.",
-        role="Role assigned to Nitro boosters (optional).",
+        role="Role assigned to Nitro boosters (required).",
     )
     @app_commands.guild_only()
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -719,8 +681,7 @@ class SetupCommandsCog(commands.Cog):
         self,
         interaction: discord.Interaction,
         enabled: bool,
-        ask_to_select_role: Optional[bool] = False,
-        role: Optional[discord.Role] = None,
+        role: discord.Role,
     ) -> None:
         if interaction.guild is None:
             await interaction.response.send_message(
@@ -745,26 +706,20 @@ class SetupCommandsCog(commands.Cog):
             )
             return
 
-        if role is None and ask_to_select_role:
-            await interaction.followup.send(
-                "Please rerun `/setup boosters` and choose a role to assign boosters.",
-                ephemeral=True,
-            )
-            return
-
+        # role is required (non-optional) per command signature
         config = self._save_settings(
             interaction.guild,
             interaction.user.id,
             {
                 "boosters_enabled": True,
-                "boosters_role_id": role.id if role else None,
-                "boosters_role_name": role.name if role else None,
+                "boosters_role_id": role.id,
+                "boosters_role_name": role.name,
             },
         )
         embed = discord.Embed(
             title="Booster settings updated",
             colour=discord.Colour.blurple(),
-            timestamp=config.get("updated_at"),
+            timestamp=cast(Optional[datetime], config.get("updated_at")),
             description=(
                 f"Booster tracking enabled. Using role: {role.mention if role else 'None'}."
             ),
