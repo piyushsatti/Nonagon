@@ -67,4 +67,3 @@ def test_link_lists(now):
 def test_validate_character_minimal(now):
     c = make_character(now)
     c.validate_character()  # should not raise
-

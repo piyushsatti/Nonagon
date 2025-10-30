@@ -1,0 +1,11 @@
+{
+  "editor.detectIndentation": false,
+  "editor.insertSpaces": false,
+  "editor.tabSize": 4,
+  "files.eol": "\n",
+  "[python]": {
+    "editor.insertSpaces": false,
+    "editor.tabSize": 4,
+    "editor.formatOnSave": false
+  }
+}

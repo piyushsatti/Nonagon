@@ -3,7 +3,7 @@
 import math
 import pytest
 from datetime import datetime
-from app.domain.models.UserModel import User, Player, Referee, Role
+from app.domain.models.UserModel import User, Player, Referee
 from app.domain.models.EntityIDModel import UserID, CharacterID, QuestID, SummaryID
 
 

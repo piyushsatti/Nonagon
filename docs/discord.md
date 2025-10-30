@@ -29,17 +29,41 @@ This page documents the bot’s slash commands, their inputs, permission require
 > **ID format:** All quest, character, and summary identifiers use postal-style values such as `QUESH3X1T7` or `CHARB2F4D9`. Slash commands expect the full ID string (including prefix).
 > Demo logs for quest actions surface these postal IDs directly so moderators can cross-check announcements.
 
-- `createquest`
-  - Inputs: `title: str`, `start_time_epoch: int>=0`, `duration_hours: int[1..48]`, `description?: str`, `image_url?: str`
-  - Permissions: must run in a guild; user must be REFEREE
-  - Output: quest announcement embed in channel; ephemeral confirmation
-  - Logging: info log; demo log entry
-- `joinquest`
+- `/quest create`
+  - Flow: DM wizard prompts for title, description, start time, duration, and optional cover image. Preview embed updates after each step.
+  - Permissions: must run in a guild; caller must be REFEREE or allowed staff.
+  - Output: quest stored as `DRAFT`, DM summary with preview and `/quest announce` reminder, ephemeral confirmation.
+  - Logging: demo log once the quest is announced.
+- `/quest edit`
+  - Flow: DM wizard updates existing quest fields with live preview after each change.
+  - Permissions: referee or allowed staff.
+  - Output: quest updated; existing announcement embed refreshed if present; DM summary sent.
+  - Logging: warnings on failures; demo log for downstream actions (accept/decline, etc.).
+- `/quest announce`
+  - Inputs: `quest: str` (Quest ID), `time?: str` (ISO string, `<t:epoch>`, or `YYYY-MM-DD HH:MM` in UTC)
+  - Permissions: referee or allowed staff.
+  - Output: immediate announcement (pings configured quest role) or scheduled via `announce_at`.
+  - Logging: demo log; warnings on configuration errors.
+- `/quest nudge`
+  - Inputs: `quest: str`
+  - Permissions: quest referee; enforces 48h cooldown.
+  - Output: posts “Quest Nudge” embed in announcement channel, optionally mentions quest ping role.
+  - Logging: demo log; cooldown guidance returned ephemerally.
+- `/quest cancel`
+  - Inputs: `quest: str`
+  - Permissions: referee or allowed staff.
+  - Output: quest marked `CANCELLED`, signup view removed, announcement embed updated.
+  - Logging: demo log; errors logged.
+- `/quest players`
+  - Inputs: `quest: str`
+  - Permissions: referee or allowed staff.
+  - Output: ephemeral embed listing selected and pending players with mentions + character IDs (quest must be `COMPLETED`).
+- `/joinquest`
   - Inputs: `quest_id: str` (autocomplete), `character_id: str` (autocomplete)
   - Permissions: must run in a guild; user must be PLAYER and own the character
   - Output: ephemeral confirmation; channel message notes the join
   - Logging: demo log; debug logs on fetch failures
-- `leavequest`
+- `/leavequest`
   - Inputs: `quest_id: str`
   - Permissions: must run in a guild; user must be signed up
   - Output: ephemeral confirmation; channel message notes the leave
@@ -55,6 +79,19 @@ This page documents the bot’s slash commands, their inputs, permission require
   - Output: ephemeral confirmation; channel notice encouraging summaries
   - Logging: info log; demo log
 
+## Summaries
+
+- `/summary create`
+  - Flow: Kicks off a DM wizard to gather title, linked quests, involved characters, and a short TL;DR, then immediately posts an embed in the configured summary channel and opens a discussion thread.
+  - Permissions: must run in a guild; caller must own at least one character (staff override honoured).
+  - Output: summary embed + new thread prompting the author to share the full write-up; links and metadata stored for later reference.
+  - Logging: demo log entry so moderators can track shared summaries.
+- `/summary edit`
+  - Inputs: `summary:<ID>`
+  - Permissions: summary author (staff override).
+  - Flow: DM wizard mirrors create, allowing skip/clear per field, and refreshes the public embed in place.
+  - Output: updated embed and metadata; long-form thread content remains untouched.
+
 ## Quest Signup Buttons
 
 - `Request to Join`
@@ -69,16 +106,26 @@ This page documents the bot’s slash commands, their inputs, permission require
 
 ## Characters
 
-- `character_add`
-  - Inputs: `name: str`, `ddb_link: str`, `character_thread_link: str`, `token_link: str`, `art_link: str`, `description?: str`, `notes?: str`, `tags?: str`
+- `/character create`
+  - Guided DM wizard (modals) collecting name, links, description, notes, tags
   - Permissions: must run in a guild; member only
-  - Output: ephemeral confirmation with new character ID (e.g., `CHARB2F4D9`)
-  - Logging: info log; demo log
-- `character_list`
+  - Output: posts announcement in configured channel, creates a private onboarding thread, DM confirmation with announcement link
+- `/character list`
   - Inputs: none
   - Permissions: must run in a guild; member only
-  - Output: ephemeral embed of the caller’s characters
-  - Logging: none
+  - Output: ephemeral embed listing the caller’s characters and sheet links
+- `/character edit`
+  - Inputs: `character` (ID autocomplete)
+  - Permissions: owner or staff roles
+  - Output: DM wizard to edit fields, updates announcement embed/thread
+- `/character state`
+  - Inputs: `character` (ID autocomplete), `state` (active/retired)
+  - Permissions: owner or staff roles
+  - Output: toggles status and refreshes the public embed
+- `/character show`
+  - Inputs: `character` (ID autocomplete)
+  - Permissions: owner or staff roles
+  - Output: ephemeral embed with announcement link button
 
 ## Stats
 

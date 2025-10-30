@@ -1,239 +1,27 @@
 from __future__ import annotations
 
-import logging
 import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, List, Optional
 
 import discord
 
-from app.bot.quest.models import ForgePreviewState, parse_forge_draft
+from app.bot.ui.wizards import send_ephemeral_message
 from app.bot.utils.log_stream import send_demo_log
 from app.domain.models.EntityIDModel import CharacterID, QuestID, UserID
 from app.domain.models.QuestModel import PlayerSignUp, PlayerStatus, Quest
 
 if TYPE_CHECKING:
-    from app.bot.quest.service import QuestService
+    from app.bot.cogs.QuestCommandsCog import QuestCommandsCog
 
 NO_PENDING_REQUESTS_LABEL = "No pending requests"
 
 
-class ForgeDraftView(discord.ui.View):
-    def __init__(self, service: "QuestService", message: discord.Message) -> None:
-        super().__init__(timeout=None)
-        self.service = service
-        self.guild_id = message.guild.id if message.guild else 0
-        self.channel_id = message.channel.id
-        self.message_id = message.id
-        self.author_id = message.author.id
-
-    async def _ensure_referee(self, interaction: discord.Interaction) -> bool:
-        if interaction.guild is None:
-            await interaction.response.send_message(
-                "Forge actions are only available inside a guild.", ephemeral=True
-            )
-            return False
-
-        if interaction.user.id != self.author_id:
-            await interaction.response.send_message(
-                "Only the draft author can manage this quest.", ephemeral=True
-            )
-            return False
-
-        if not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message(
-                "Only guild members can manage forge drafts.", ephemeral=True
-            )
-            return False
-
-        try:
-            user = await self.service.get_cached_user(interaction.user)
-        except Exception:
-            await interaction.response.send_message(
-                "Unable to resolve your profile; please try again shortly.",
-                ephemeral=True,
-            )
-            return False
-
-        if not user.is_referee:
-            await interaction.response.send_message(
-                "You need the REFEREE role to manage quests.", ephemeral=True
-            )
-            return False
-
-        return True
-
-    async def _resolve_message(self, interaction: discord.Interaction) -> Optional[discord.Message]:
-        channel = interaction.guild.get_channel(self.channel_id) if interaction.guild else None
-        if channel is None and interaction.guild is not None:
-            try:
-                channel = await interaction.guild.fetch_channel(self.channel_id)
-            except Exception:
-                return None
-
-        if channel is None:
-            return None
-
-        try:
-            return await channel.fetch_message(self.message_id)
-        except Exception:
-            return None
-
-    def _preview_state(self) -> ForgePreviewState:
-        return self.service.forge_preview_state(self.guild_id, self.message_id)
-
-    async def _resolve_thread(
-        self,
-        interaction: discord.Interaction,
-        message: discord.Message,
-        state: ForgePreviewState,
-    ) -> Optional[discord.Thread]:
-        guild = interaction.guild
-        if guild is None:
-            return None
-
-        thread: Optional[discord.Thread] = None
-        if state.thread_id:
-            thread = guild.get_thread(state.thread_id)
-            if thread is None:
-                try:
-                    fetched = await guild.fetch_channel(state.thread_id)
-                except Exception:
-                    fetched = None
-                if isinstance(fetched, discord.Thread):
-                    thread = fetched
-
-        if thread is not None:
-            return thread
-
-        try:
-            name = f"Quest Preview {interaction.user.display_name}"[:90]
-            thread = await message.create_thread(name=name, auto_archive_duration=60)
-        except Exception:
-            return None
-
-        state.thread_id = thread.id
-        return thread
-
-    async def _send_preview_to_thread(
-        self,
-        thread: discord.Thread,
-        state: ForgePreviewState,
-        embed: discord.Embed,
-    ) -> Optional[str]:
-        try:
-            if state.preview_message_id:
-                preview_message = await thread.fetch_message(state.preview_message_id)
-                await preview_message.edit(embed=embed, content=None)
-            else:
-                preview_message = await thread.send(embed=embed)
-                state.preview_message_id = preview_message.id
-        except Exception:
-            try:
-                preview_message = await thread.send(embed=embed)
-                state.preview_message_id = preview_message.id
-            except Exception:
-                return None
-
-        state.last_rendered_at = datetime.now(timezone.utc)
-        return thread.jump_url
-
-    @discord.ui.button(label="Preview", style=discord.ButtonStyle.primary)
-    async def preview_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        if not await self._ensure_referee(interaction):
-            return
-
-        message = await self._resolve_message(interaction)
-        if message is None:
-            await interaction.response.send_message(
-                "Unable to locate the draft message.", ephemeral=True
-            )
-            return
-
-        await interaction.response.defer(ephemeral=True, thinking=True)
-
-        draft = parse_forge_draft(message.content)
-        quest_id = f"DRAFT{self.message_id}"
-        embed = self.service.build_draft_embed(
-            draft,
-            quest_id=quest_id,
-            referee_display=interaction.user.mention,
-        )
-
-        state = self._preview_state()
-        thread = await self._resolve_thread(interaction, message, state)
-        preview_link = None
-        if thread is not None:
-            preview_link = await self._send_preview_to_thread(thread, state, embed)
-
-        if preview_link:
-            await interaction.followup.send(
-                f"Preview updated in [thread]({preview_link}).", ephemeral=True
-            )
-        else:
-            await interaction.followup.send(embed=embed, ephemeral=True)
-
-    @discord.ui.button(label="Approve", style=discord.ButtonStyle.success)
-    async def approve_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        if not await self._ensure_referee(interaction):
-            return
-
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        message = await self._resolve_message(interaction)
-        if message is None or interaction.guild is None:
-            await interaction.followup.send(
-                "Unable to locate the draft message for approval.", ephemeral=True
-            )
-            return
-
-        draft = parse_forge_draft(message.content)
-
-        try:
-            result = await self.service.approve_forge_draft(
-                interaction,
-                draft=draft,
-                author=interaction.user,
-                source_message=message,
-            )
-        except Exception as exc:
-            logging.exception("Forge approve failed: %s", exc)
-            await interaction.followup.send(
-                "Quest approval failed; please try again later.", ephemeral=True
-            )
-            return
-
-        if result is None:
-            await interaction.followup.send(
-                "Quest approval aborted; please review the draft details.",
-                ephemeral=True,
-            )
-            return
-
-        await interaction.followup.send(result, ephemeral=True)
-
-    @discord.ui.button(label="Discard", style=discord.ButtonStyle.danger)
-    async def discard_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        if not await self._ensure_referee(interaction):
-            return
-
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        message = await self._resolve_message(interaction)
-        if message is None:
-            await interaction.followup.send("Draft already removed.", ephemeral=True)
-            return
-
-        await self.service.discard_forge_draft(interaction, source_message=message)
-        await interaction.followup.send("Draft discarded.", ephemeral=True)
+logger = get_logger(__name__)
 
 
 class JoinQuestModal(discord.ui.Modal):
-    def __init__(self, service: "QuestService", quest_id: str) -> None:
+    def __init__(self, service: "QuestCommandsCog", quest_id: str) -> None:
         super().__init__(title=f"Join {quest_id}")
         self.service = service
         self.quest_id = quest_id
@@ -260,10 +48,13 @@ class JoinQuestModal(discord.ui.Modal):
 
 
 class QuestSignupView(discord.ui.View):
-    def __init__(self, service: "QuestService", quest_id: Optional[str] = None) -> None:
+    def __init__(self, service: "QuestCommandsCog", quest_id: Optional[str] = None) -> None:
         super().__init__(timeout=None)
         self.service = service
         self.quest_id = quest_id
+
+    class _ValidationError(Exception):
+        pass
 
     def _resolve_quest_id(self, interaction: discord.Interaction) -> str:
         if self.quest_id:
@@ -276,6 +67,35 @@ class QuestSignupView(discord.ui.View):
                 return match.group(1)
         raise ValueError("Unable to determine quest id from message.")
 
+    async def _send_validation_error(
+        self, interaction: discord.Interaction, message: str
+    ) -> None:
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+
+    def _require_guild_member(
+        self, interaction: discord.Interaction, error_message: str
+    ) -> discord.Member:
+        member = interaction.user
+        if interaction.guild is None or not isinstance(member, discord.Member):
+            raise QuestSignupView._ValidationError(error_message)
+        return member
+
+    def _require_quest_id_str(self, interaction: discord.Interaction) -> str:
+        try:
+            return self._resolve_quest_id(interaction)
+        except ValueError as exc:
+            raise QuestSignupView._ValidationError(str(exc)) from exc
+
+    def _require_parsed_quest_id(self, interaction: discord.Interaction) -> QuestID:
+        quest_id_str = self._require_quest_id_str(interaction)
+        try:
+            return QuestID.parse(quest_id_str)
+        except ValueError as exc:
+            raise QuestSignupView._ValidationError(str(exc)) from exc
+
     @discord.ui.button(
         label="Request to Join",
         style=discord.ButtonStyle.success,
@@ -286,27 +106,33 @@ class QuestSignupView(discord.ui.View):
     ) -> None:
         try:
             quest_id = self._resolve_quest_id(interaction)
-        except ValueError as exc:
-            await interaction.response.send_message(str(exc), ephemeral=True)
+        except ValueError:
+            await send_ephemeral_message(
+                interaction,
+                "I couldn't determine which quest this is. Please refresh the announcement and try again.",
+            )
             return
         if interaction.guild is None or not isinstance(
             interaction.user, discord.Member
         ):
-            await interaction.response.send_message(
-                "Unable to resolve characters outside a guild.", ephemeral=True
+            await send_ephemeral_message(
+                interaction,
+                "I can only look up characters inside a guild. Please run this from a server channel.",
             )
+        except QuestSignupView._ValidationError as exc:
+            await self._send_validation_error(interaction, str(exc))
             return
 
         class _EphemeralJoin(discord.ui.View):
             def __init__(
-                self, service: "QuestService", quest_id: str, member: discord.Member
+                self, service: "QuestCommandsCog", quest_id: str, member: discord.Member
             ):
                 super().__init__(timeout=60)
                 self.add_item(CharacterSelect(service, quest_id, member))
 
         await interaction.response.send_message(
             "Select your character to request a spot:",
-            view=_EphemeralJoin(self.service, quest_id, interaction.user),
+            view=_EphemeralJoin(self.service, quest_id, member),
             ephemeral=True,
         )
 
@@ -321,46 +147,53 @@ class QuestSignupView(discord.ui.View):
         try:
             quest_id_raw = self._resolve_quest_id(interaction)
             quest_id = QuestID.parse(quest_id_raw)
-        except ValueError as exc:
-            await interaction.response.send_message(str(exc), ephemeral=True)
+        except ValueError:
+            await send_ephemeral_message(
+                interaction,
+                "I couldn't determine which quest this is. Please refresh the announcement and try again.",
+            )
             return
 
         if interaction.guild is None or not isinstance(
             interaction.user, discord.Member
         ):
-            await interaction.response.send_message(
-                "Unable to review requests outside a guild.", ephemeral=True
+            await send_ephemeral_message(
+                interaction,
+                "I can only review requests inside a guild. Please open this from the server announcement.",
             )
+        except QuestSignupView._ValidationError as exc:
+            await self._send_validation_error(interaction, str(exc))
             return
 
         try:
-            reviewer = await self.service.get_cached_user(interaction.user)
+            reviewer = await self.service.get_cached_user(member)
         except Exception:
-            await interaction.response.send_message(
-                "Unable to resolve your profile; please try again shortly.",
-                ephemeral=True,
+            await send_ephemeral_message(
+                interaction,
+                "I couldn't resolve your profile just now; please try again shortly.",
             )
             return
 
         if not reviewer.is_referee:
-            await interaction.response.send_message(
-                "Only referees can review quest requests.", ephemeral=True
+            await send_ephemeral_message(
+                interaction,
+                "Only referees can review quest requests. If you should have access, ask a staff member to confirm your role.",
             )
             return
 
-        quest = self.service.fetch_quest(interaction.guild.id, quest_id)
+        quest = self.service.fetch_quest(member.guild.id, quest_id)
         if quest is None:
-            await interaction.response.send_message(
-                "Quest not found; please refresh the announcement.",
-                ephemeral=True,
+            await send_ephemeral_message(
+                interaction,
+                "I couldn't find that quest. Please refresh the announcement and try again.",
             )
             return
 
         pending = [s for s in quest.signups if s.status is not PlayerStatus.SELECTED]
         if not pending and not quest.is_signup_open:
-            await interaction.response.send_message(
-                "No pending requests and signups are already closed.",
-                ephemeral=True,
+            await send_ephemeral_message(
+                interaction,
+                "There are no pending requests, and signups are already closed.",
             )
             return
 
@@ -389,15 +222,18 @@ class QuestSignupView(discord.ui.View):
         try:
             quest_id_raw = self._resolve_quest_id(interaction)
             quest_id = QuestID.parse(quest_id_raw)
-        except ValueError as exc:
-            await interaction.response.send_message(str(exc), ephemeral=True)
+        except ValueError:
+            await send_ephemeral_message(
+                interaction,
+                "I couldn't determine which quest this is. Please refresh the announcement and try again.",
+            )
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             message = await self.service.execute_nudge(interaction, quest_id)
         except ValueError as exc:
-            await interaction.followup.send(str(exc), ephemeral=True)
+            await interaction.followup.send(f"{exc} Please try again.", ephemeral=True)
             return
 
         await interaction.followup.send(message, ephemeral=True)
@@ -413,21 +249,24 @@ class QuestSignupView(discord.ui.View):
         try:
             quest_id = self._resolve_quest_id(interaction)
             quest_id_obj = QuestID.parse(quest_id)
-        except ValueError as exc:
-            await interaction.response.send_message(str(exc), ephemeral=True)
+        except ValueError:
+            await send_ephemeral_message(
+                interaction,
+                "I couldn't determine which quest this is. Please refresh the announcement and try again.",
+            )
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             message = await self.service.execute_leave(interaction, quest_id_obj)
         except ValueError as exc:
-            await interaction.followup.send(str(exc), ephemeral=True)
+            await interaction.followup.send(f"{exc} Please try again.", ephemeral=True)
             return
         await interaction.followup.send(message, ephemeral=True)
 
 
 class CharacterSelect(discord.ui.Select):
-    def __init__(self, service: "QuestService", quest_id: str, member: discord.Member):
+    def __init__(self, service: "QuestCommandsCog", quest_id: str, member: discord.Member):
         self.service = service
         self.quest_id = quest_id
         self.member = member
@@ -481,7 +320,10 @@ class CharacterSelect(discord.ui.Select):
                 interaction, quest_id_obj, char_id_obj
             )
         except Exception as exc:
-            await interaction.response.send_message(str(exc), ephemeral=True)
+            await send_ephemeral_message(
+                interaction,
+                f"{exc} Please try again.",
+            )
             return
 
         await interaction.response.send_message(message, ephemeral=True)
@@ -491,7 +333,7 @@ class SignupDecisionView(discord.ui.View):
     def __init__(
         self,
         *,
-        service: "QuestService",
+        service: "QuestCommandsCog",
         guild: discord.Guild,
         quest: Quest,
         reviewer: discord.Member,
@@ -595,8 +437,9 @@ class SignupDecisionView(discord.ui.View):
     async def handle_accept(self, interaction: discord.Interaction) -> None:
         signup = self.pending_map.get(self.selected_user_id or "")
         if signup is None:
-            await interaction.response.send_message(
-                "Select a request to accept first.", ephemeral=True
+            await send_ephemeral_message(
+                interaction,
+                "Select a request to accept first.",
             )
             return
 
@@ -607,14 +450,18 @@ class SignupDecisionView(discord.ui.View):
                 self.guild, self.quest, signup.user_id
             )
         except ValueError as exc:
-            await interaction.followup.send(str(exc), ephemeral=True)
+            await interaction.followup.send(
+                f"{exc} Please try again.", ephemeral=True
+            )
             return
 
         if not via_api:
             try:
                 self.quest.select_signup(signup.user_id)
             except ValueError as exc:
-                await interaction.followup.send(str(exc), ephemeral=True)
+                await interaction.followup.send(
+                    f"{exc} Please try again.", ephemeral=True
+                )
                 return
             self.service.persist_quest(self.guild.id, self.quest)
         else:
@@ -631,10 +478,14 @@ class SignupDecisionView(discord.ui.View):
 
         await self._notify_player(signup, accepted=True)
         await self._notify_channel(signup, accepted=True)
-        await send_demo_log(
+        signup_label = self.service.format_signup_label(self.guild.id, signup)
+        await logger.audit(
             self.service.bot,
             self.guild,
-            f"{self.reviewer.mention} accepted {self.service.format_signup_label(self.guild.id, signup)} for `{self.quest.title or self.quest.quest_id}`",
+            "%s accepted %s for `%s`",
+            self.reviewer.mention,
+            signup_label,
+            self.quest.title or self.quest.quest_id,
         )
 
         self._refresh_from_quest()
@@ -648,8 +499,9 @@ class SignupDecisionView(discord.ui.View):
     async def handle_decline(self, interaction: discord.Interaction) -> None:
         signup = self.pending_map.get(self.selected_user_id or "")
         if signup is None:
-            await interaction.response.send_message(
-                "Select a request to decline first.", ephemeral=True
+            await send_ephemeral_message(
+                interaction,
+                "Select a request to decline first.",
             )
             return
 
@@ -660,14 +512,18 @@ class SignupDecisionView(discord.ui.View):
                 self.guild, self.quest, signup.user_id
             )
         except ValueError as exc:
-            await interaction.followup.send(str(exc), ephemeral=True)
+            await interaction.followup.send(
+                f"{exc} Please try again.", ephemeral=True
+            )
             return
 
         if not via_api:
             try:
                 self.quest.remove_signup(signup.user_id)
             except ValueError as exc:
-                await interaction.followup.send(str(exc), ephemeral=True)
+                await interaction.followup.send(
+                    f"{exc} Please try again.", ephemeral=True
+                )
                 return
             self.service.persist_quest(self.guild.id, self.quest)
         else:
@@ -684,10 +540,14 @@ class SignupDecisionView(discord.ui.View):
 
         await self._notify_player(signup, accepted=False)
         await self._notify_channel(signup, accepted=False)
-        await send_demo_log(
+        signup_label = self.service.format_signup_label(self.guild.id, signup)
+        await logger.audit(
             self.service.bot,
             self.guild,
-            f"{self.reviewer.mention} declined {self.service.format_signup_label(self.guild.id, signup)} for `{self.quest.title or self.quest.quest_id}`",
+            "%s declined %s for `%s`",
+            self.reviewer.mention,
+            signup_label,
+            self.quest.title or self.quest.quest_id,
         )
 
         self._refresh_from_quest()
@@ -700,8 +560,9 @@ class SignupDecisionView(discord.ui.View):
 
     async def handle_close(self, interaction: discord.Interaction) -> None:
         if not self.quest.is_signup_open:
-            await interaction.response.send_message(
-                "Signups are already closed for this quest.", ephemeral=True
+            await send_ephemeral_message(
+                interaction,
+                "Signups are already closed for this quest.",
             )
             return
 
@@ -710,14 +571,18 @@ class SignupDecisionView(discord.ui.View):
         try:
             via_api = await self.service.close_signups_via_api(self.guild, self.quest)
         except ValueError as exc:
-            await interaction.followup.send(str(exc), ephemeral=True)
+            await interaction.followup.send(
+                f"{exc} Please try again.", ephemeral=True
+            )
             return
 
         if not via_api:
             try:
                 self.quest.close_signups()
             except ValueError as exc:
-                await interaction.followup.send(str(exc), ephemeral=True)
+                await interaction.followup.send(
+                    f"{exc} Please try again.", ephemeral=True
+                )
                 return
             self.service.persist_quest(self.guild.id, self.quest)
         else:
@@ -738,10 +603,12 @@ class SignupDecisionView(discord.ui.View):
         )
 
         await self._notify_channel_closed()
-        await send_demo_log(
+        await logger.audit(
             self.service.bot,
             self.guild,
-            f"{self.reviewer.mention} closed signups for `{self.quest.title or self.quest.quest_id}`",
+            "%s closed signups for `%s`",
+            self.reviewer.mention,
+            self.quest.title or self.quest.quest_id,
         )
 
         self._refresh_from_quest()
@@ -844,15 +711,17 @@ class SignupPendingSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if self.disabled:
-            await interaction.response.send_message(
-                "No pending requests to review.", ephemeral=True
+            await send_ephemeral_message(
+                interaction,
+                "There are no pending requests to review.",
             )
             return
 
         value = self.values[0]
         if value == "NONE":
-            await interaction.response.send_message(
-                "No pending requests to review.", ephemeral=True
+            await send_ephemeral_message(
+                interaction,
+                "There are no pending requests to review.",
             )
             return
 

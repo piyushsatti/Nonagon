@@ -22,9 +22,9 @@ from app.api.schemas import (
 
 MONGO_URI = (os.getenv("MONGODB_URI") or os.getenv("MONGO_URI") or "").strip()
 if not MONGO_URI:
-  logging.getLogger(__name__).warning(
+    logging.getLogger(__name__).warning(
     "MONGODB_URI not set; demo endpoints will use the default localhost client."
-  )
+    )
 
 db_client = MongoClient(MONGO_URI) if MONGO_URI else MongoClient()
 
@@ -50,18 +50,18 @@ def _guild_db_names(target: str | None = None) -> Sequence[str]:
 
 
 def _coerce_entity_id(payload, prefix: str) -> str | None:
-  if isinstance(payload, dict):
-    value = payload.get("value")
-    if isinstance(value, str) and value:
-      return value
-    number = payload.get("number")
-    if number is not None:
-      return f"{payload.get('prefix', prefix)}{number}"
-  elif isinstance(payload, str) and payload:
-    return payload
-  elif isinstance(payload, int):
-    return f"{prefix}{payload}"
-  return None
+    if isinstance(payload, dict):
+        value = payload.get("value")
+        if isinstance(value, str) and value:
+            return value
+        number = payload.get("number")
+        if number is not None:
+            return f"{payload.get('prefix', prefix)}{number}"
+    elif isinstance(payload, str) and payload:
+        return payload
+    elif isinstance(payload, int):
+        return f"{prefix}{payload}"
+    return None
 
 
 async def _query_leaderboard(
@@ -153,114 +153,114 @@ async def demo_upcoming_quests(
 async def demo_page() -> str:
     return """<!DOCTYPE html>
 <html lang=\"en\">
-  <head>
+    <head>
     <meta charset=\"utf-8\" />
     <title>Nonagon Demo Dashboard</title>
     <style>
-      body { font-family: system-ui, sans-serif; margin: 2rem; background: #0f172a; color: #e2e8f0; }
-      h1 { color: #38bdf8; }
-      section { margin-bottom: 2rem; }
-      table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
-      th, td { border: 1px solid #1e293b; padding: 0.5rem; text-align: left; }
-      th { background: #1e293b; }
-      .muted { color: #94a3b8; font-size: 0.9rem; }
-      button { background: #38bdf8; border: none; padding: 0.5rem 1rem; color: #0f172a; border-radius: 4px; cursor: pointer; }
-      button:hover { background: #0ea5e9; }
+        body { font-family: system-ui, sans-serif; margin: 2rem; background: #0f172a; color: #e2e8f0; }
+        h1 { color: #38bdf8; }
+        section { margin-bottom: 2rem; }
+        table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+        th, td { border: 1px solid #1e293b; padding: 0.5rem; text-align: left; }
+        th { background: #1e293b; }
+        .muted { color: #94a3b8; font-size: 0.9rem; }
+        button { background: #38bdf8; border: none; padding: 0.5rem 1rem; color: #0f172a; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0ea5e9; }
     </style>
-  </head>
-  <body>
+    </head>
+    <body>
     <h1>Nonagon Demo Dashboard</h1>
     <section>
-      <h2>Leaderboards</h2>
-      <div class=\"muted\">Top 10 users by chosen metric across demo guilds.</div>
-      <div>
+        <h2>Leaderboards</h2>
+        <div class=\"muted\">Top 10 users by chosen metric across demo guilds.</div>
+        <div>
         <button onclick=\"loadLeaderboard('messages')\">Messages</button>
         <button onclick=\"loadLeaderboard('reactions_given')\">Reactions Given</button>
         <button onclick=\"loadLeaderboard('reactions_received')\">Reactions Received</button>
         <button onclick=\"loadLeaderboard('voice')\">Voice Hours</button>
         <select id=\"guildFilter\" onchange=\"onGuildChange()\">
-          <option value=\"\">All Guilds</option>
+            <option value=\"\">All Guilds</option>
         </select>
-      </div>
-      <table id=\"leaderboard\">
+        </div>
+        <table id=\"leaderboard\">
         <thead><tr><th>Rank</th><th>Guild</th><th>User</th><th>Value</th></tr></thead>
         <tbody></tbody>
-      </table>
+        </table>
     </section>
     <section>
-      <h2>Recent Summaries</h2>
-      <table id=\"summaries\">
+        <h2>Recent Summaries</h2>
+        <table id=\"summaries\">
         <thead><tr><th>Guild</th><th>Kind</th><th>Quest</th><th>Character</th><th>Title</th><th>Created</th></tr></thead>
         <tbody></tbody>
-      </table>
+        </table>
     </section>
     <section>
-      <h2>Upcoming Quests</h2>
-      <table id=\"quests\">
+        <h2>Upcoming Quests</h2>
+        <table id=\"quests\">
         <thead><tr><th>Guild</th><th>Quest</th><th>Title</th><th>Starts</th><th>Status</th></tr></thead>
         <tbody></tbody>
-      </table>
+        </table>
     </section>
     <script>
-      let currentGuild = '';
-      async function loadGuilds() {
+        let currentGuild = '';
+        async function loadGuilds() {
         const res = await fetch('/demo/guilds');
         const data = await res.json();
         const select = document.querySelector('#guildFilter');
         data.guilds.forEach(id => {
-          const opt = document.createElement('option');
-          opt.value = id;
-          opt.innerText = id;
-          select.appendChild(opt);
+            const opt = document.createElement('option');
+            opt.value = id;
+            opt.innerText = id;
+            select.appendChild(opt);
         });
-      }
-      function onGuildChange() {
+        }
+        function onGuildChange() {
         const sel = document.querySelector('#guildFilter');
         currentGuild = sel.value;
         loadLeaderboard('messages');
         loadQuests();
         loadSummaries();
-      }
-      async function loadLeaderboard(metric) {
+        }
+        async function loadLeaderboard(metric) {
         const res = await fetch(`/demo/leaderboard?metric=${metric}&guild_id=${currentGuild}`);
         const data = await res.json();
         const tbody = document.querySelector('#leaderboard tbody');
         tbody.innerHTML = '';
         data.entries.forEach((entry, idx) => {
-          const row = document.createElement('tr');
-          row.innerHTML = `<td>${idx + 1}</td><td>${entry.guild_id}</td><td>${entry.discord_id || 'N/A'}</td><td>${entry.value.toFixed(2)}</td>`;
-          tbody.appendChild(row);
+            const row = document.createElement('tr');
+            row.innerHTML = `<td>${idx + 1}</td><td>${entry.guild_id}</td><td>${entry.discord_id || 'N/A'}</td><td>${entry.value.toFixed(2)}</td>`;
+            tbody.appendChild(row);
         });
-      }
+        }
 
-      async function loadQuests() {
+        async function loadQuests() {
         const res = await fetch(`/demo/quests?guild_id=${currentGuild}`);
         const data = await res.json();
         const tbody = document.querySelector('#quests tbody');
         tbody.innerHTML = '';
         data.quests.forEach((quest) => {
-          const starts = quest.starting_at ? new Date(quest.starting_at).toLocaleString() : 'Unknown';
-          const row = document.createElement('tr');
-          row.innerHTML = `<td>${quest.guild_id}</td><td>${quest.quest_id}</td><td>${quest.title || 'Untitled'}</td><td>${starts}</td><td>${quest.status || 'ANNOUNCED'}</td>`;
-          tbody.appendChild(row);
+            const starts = quest.starting_at ? new Date(quest.starting_at).toLocaleString() : 'Unknown';
+            const row = document.createElement('tr');
+            row.innerHTML = `<td>${quest.guild_id}</td><td>${quest.quest_id}</td><td>${quest.title || 'Untitled'}</td><td>${starts}</td><td>${quest.status || 'ANNOUNCED'}</td>`;
+            tbody.appendChild(row);
         });
-      }
-      async function loadSummaries() {
+        }
+        async function loadSummaries() {
         const res = await fetch(`/demo/summaries?guild_id=${currentGuild}`);
         const data = await res.json();
         const tbody = document.querySelector('#summaries tbody');
         tbody.innerHTML = '';
         data.summaries.forEach((s) => {
-          const created = s.created_on ? new Date(s.created_on).toLocaleString() : '';
-          const row = document.createElement('tr');
-          row.innerHTML = `<td>${s.guild_id}</td><td>${s.kind}</td><td>${s.quest_id}</td><td>${s.character_id}</td><td>${s.title || 'Untitled'}</td><td>${created}</td>`;
-          tbody.appendChild(row);
+            const created = s.created_on ? new Date(s.created_on).toLocaleString() : '';
+            const row = document.createElement('tr');
+            row.innerHTML = `<td>${s.guild_id}</td><td>${s.kind}</td><td>${s.quest_id}</td><td>${s.character_id}</td><td>${s.title || 'Untitled'}</td><td>${created}</td>`;
+            tbody.appendChild(row);
         });
-      }
+        }
 
-      loadGuilds().then(() => { loadLeaderboard('messages'); loadQuests(); loadSummaries(); });
+        loadGuilds().then(() => { loadLeaderboard('messages'); loadQuests(); loadSummaries(); });
     </script>
-  </body>
+    </body>
 </html>"""
 
 

@@ -64,6 +64,24 @@ Adjust the command once the test harness is finalized (e.g., split domain vs. in
 
 Contributions are welcome! Please open an issue or submit a pull request once contribution guidelines are defined.
 
+### Indentation Policy (Strict Tabs)
+
+- Python source files must use tabs for leading indentation (no spaces). Mixing tabs and spaces is rejected.
+- Configuration formats that commonly expect spaces (YAML/JSON/TOML) use 2 spaces.
+- This is enforced via `.editorconfig`, Ruff (no W191, but E101 enabled), and a pre-commit hook.
+
+Setup pre-commit hooks:
+
+```bash
+pip install pre-commit
+pre-commit install
+pre-commit run -a
+```
+
+Notes:
+- Disable Python format-on-save that converts tabs to spaces. VS Code settings are included in `.vscode/settings.json`.
+- Black is not used to avoid conflicts with the tab policy. Ruff is configured for linting.
+
 ## License
 
 This project is licensed under the MIT License.

@@ -63,7 +63,7 @@ Deliver a guild-friendly Discord companion that streamlines the full quest lifec
 - Workflow: To Do -> In Progress -> In Review -> Done.
 
 ## 6. Roadmap and Priority
-- [ ] P1 - EP1 Quest Forge Flow (planned): Preview, approval, and discard flows outstanding.
+- [x] P1 - EP1 Quest DM Workflow (complete): Slash commands now drive DM-based drafting, editing, announcements, and live scheduling.
 - [x] P1 - EP2 Controlled Sign-Up Management (complete): Full review and decision flow live.
 - [x] P1 - EP3 Nudge Button (complete): Cooldown-respected quest bumping delivered.
 - [x] P1 - EP7 External Quest IDs (complete): Postal IDs flow through repositories, logging, and demos.
@@ -72,90 +72,80 @@ Deliver a guild-friendly Discord companion that streamlines the full quest lifec
 - [ ] Deferred - EP4 Friendly Player Registration Flow (paused): Resume after EP5-S4 to avoid conflicting UX.
 
 ## 7. Epics and Stories
-### EP1 - Quest Forge Flow (Priority P1, Status: Planned)
-**Goal**: Enable DMs to draft, preview, and finalize quests inside Discord.  
-**Scope**: Forge channel previews, approve and discard actions, quest board publishing.  
-**Out of Scope**: Advanced markdown parsing, multi-message drafts.  
-**Dependencies**: Quest embed builder, FastAPI quest creation endpoint.  
-**Milestones**: Preview button -> Approve and Discard actions -> Thread previews -> Publish.  
-**Non-Functional Notes**: Avoid database writes before approval, make discard idempotent, log every action.
+### EP1 - Quest DM Workflow (Priority P1, Status: Complete)
+**Goal**: Provide a DM-first quest lifecycle with optional scheduling and ongoing moderation tools.
+**Scope**: `/quest create`, `/quest edit`, `/quest announce` (immediate or scheduled), `/quest nudge`, `/quest cancel`, `/quest players`, and the background scheduler loop.
+**Out of Scope**: Automated waitlists, multi-guild broadcast tooling.
+**Dependencies**: Quest embed builder, Mongo quest persistence, guild settings store.
+**Milestones**: DM wizard -> Announcement & scheduler -> Maintenance commands -> Demo logging.
+**Non-Functional Notes**: Ensure idempotent persistence, guard cooldowns, surface friendly error copy in DMs.
 
-#### Story EP1-S1 - Preview Forge Messages
-- **Status**: Planned
-- **User Story**: As a DM, I want a Preview button on my forge message so I can render an embed before publishing.
+#### Story EP1-S1 - Quest Draft Wizard
+- **Status**: Complete
+- **User Story**: As a referee, I want a guided DM flow so I can draft a quest without juggling parameters.
 - **Acceptance Criteria**
-  1. When a DM posts a quest draft in the forge channel, the bot attaches a DM-only Preview button.
+  1. `/quest create` starts a DM wizard that collects title, description, start time, duration, and optional image URL with live embed previews.
 - **Definition of Done**
-  - [ ] Role checks enforce DM-only access.
-  - [ ] Preview button interactions are logged for auditing.
-  - [ ] No persistence occurs when a preview is generated.
+  - [x] Live preview updates after each step.
+  - [x] DRAFT quests are persisted once validation succeeds.
+  - [x] DM follow-up includes instructions for announcing.
 - **Implementation Tasks**
-  - [ ] Detect forge-channel messages in `src/app/bot/cogs/QuestCommandsCog.py`.
-  - [ ] Attach a `discord.ui.View` with a Preview callback.
-  - [ ] Expose a configurable forge channel setting.
+  - [x] Add `QuestCreationSession` with preview handling.
+  - [x] Persist drafts via `_persist_quest`.
+  - [x] Update demo docs and onboarding messages.
 
-#### Story EP1-S2 - Refreshable Previews
-- **Status**: Planned
-- **User Story**: As a DM, I want the preview to reflect my latest edits so I see final formatting.
+#### Story EP1-S2 - Announcement & Scheduler
+- **Status**: Complete
+- **User Story**: As a referee, I want to announce immediately or schedule a quest so players see it at the right time.
 - **Acceptance Criteria**
-  1. When a DM updates the draft and clicks Preview again, the embed refreshes with the latest content and replaces older previews.
+  1. `/quest announce` posts immediately when no time is provided and schedules when a future timestamp is supplied.
+  2. Background scheduler promotes quests when `announce_at <= now` and they lack channel/message IDs.
 - **Definition of Done**
-  - [ ] Embed renderer reused across preview and announce flows.
-  - [ ] Preview output isolated to a thread or ephemeral message.
-  - [ ] Errors surface ephemerally to the DM.
+  - [x] Announcement embed includes signup view and quest metadata.
+  - [x] Scheduler loop logs failures and retries safely.
+  - [x] Guild configuration validates announcement channel and permissions.
 - **Implementation Tasks**
-  - [ ] Parse forge message content and hydrate the quest embed.
-  - [ ] Convert preview responses into auto-created threads.
-  - [ ] Handle stale preview cleanup gracefully.
+  - [x] Implement `_quest_schedule_loop` polling every 60 seconds.
+  - [x] Add `_announce_quest_now` with ping-role support.
+  - [x] Extend `/setup quest` to configure announcement channel + optional ping role.
 
-#### Story EP1-S3 - Approve to Publish
-- **Status**: Planned
-- **User Story**: As a DM, I want Approve to publish and persist the quest so players can sign up.
+#### Story EP1-S3 - Quest Maintenance Commands
+- **Status**: Complete
+- **User Story**: As a referee, I want quick commands to maintain quest state after announcement.
 - **Acceptance Criteria**
-  1. Given a valid preview, when Approve is clicked, the quest posts to the quest board and is saved with ANNOUNCED status.
+  1. `/quest nudge` respects a 48h cooldown and optionally pings the configured role.
+  2. `/quest cancel` updates the embed, removes signup view, and logs the action.
+  3. `/quest players` lists selected and pending players for completed quests.
 - **Definition of Done**
-  - [ ] Announcement includes the signup view and quest ID footer.
-  - [ ] `POST /v1/quests` receives channel and message IDs with the raw markdown.
-  - [ ] Audit log entry is emitted.
+  - [x] Nudge embeds link back to the announcement and record timestamps.
+  - [x] Cancelled quests persist status and disable further signups.
+  - [x] Player listing shows postal IDs with user mentions where available.
 - **Implementation Tasks**
-  - [ ] Reuse the existing quest persistence flow.
-  - [ ] Provide guild, channel, and message IDs to FastAPI.
-  - [ ] Roll back gracefully on failures by deleting previews.
+  - [x] Rework `_execute_nudge` to reuse guild settings and cooldown logic.
+  - [x] Add roster formatting helpers for `/quest players`.
+  - [x] Ensure audit logging (demo log) exists for each action.
 
-#### Story EP1-S4 - Discard Drafts Cleanly
-- **Status**: Planned
-- **User Story**: As a DM, I want Discard to clean up drafts so the forge channel stays tidy.
+#### Story EP1-S4 - Summary Threads
+- **Status**: Complete
+- **User Story**: As a player, I want to share a summary that posts an announcement and opens a thread for the full write-up.
 - **Acceptance Criteria**
-  1. When Discard is clicked on an existing preview, the preview and thread are deleted with no quest record stored.
+  1. `/summary create` runs a DM wizard that captures metadata (title, linked quests, characters, TL;DR) and immediately posts an embed plus a discussion thread in the configured summary channel.
+  2. `/summary edit` refreshes the announcement embed while preserving thread content.
 - **Definition of Done**
-  - [ ] Discard handler is idempotent.
-  - [ ] Discard actions are logged.
-  - [ ] Error messaging is delivered ephemerally.
+  - [x] Summary embeds display author, character IDs, linked quests, and TL;DR.
+  - [x] Threads include a prompt encouraging long-form content.
+  - [x] Summaries persist channel/message/thread IDs for future updates.
 - **Implementation Tasks**
-  - [ ] Track preview message and thread IDs.
-  - [ ] Delete associated resources on discard.
-  - [ ] Handle missing preview state gracefully.
-
-#### Story EP1-S5 - Draft Quest Status
-- **Status**: Planned
-- **User Story**: As a developer, I want a DRAFT status so future iterations can persist drafts.
-- **Acceptance Criteria**
-  1. QuestStatus.DRAFT can be stored without breaking existing flows.
-- **Definition of Done**
-  - [ ] Enum updates permit DRAFT.
-  - [ ] Serialization logic supports all quest states.
-  - [ ] Tests cover DRAFT handling.
-- **Implementation Tasks**
-  - [ ] Update `QuestStatus` in `src/app/domain/models/QuestModel.py`.
-  - [ ] Adjust serialization and deserialization helpers.
-  - [ ] Add regression tests in `tests/domain/models/test_quest_model.py`.
+  - [x] Introduce `SummaryCommandsCog` with creation and update sessions.
+  - [x] Expand `QuestSummary` model with announcement metadata and validation.
+  - [x] Document the summary flow in user-facing help materials.
 
 ### EP2 - Controlled Sign-Up Management (Priority P1, Status: Complete)
-**Goal**: Let DMs approve or decline players before they join quests.  
-**Scope**: Request button, review panel, Accept and Decline updates, embed refresh.  
-**Out of Scope**: Automated waitlisting, capacity caps.  
-**Dependencies**: Mongo signups, FastAPI signup endpoints.  
-**Milestones**: Request flow -> Review UI -> Accept and Decline actions -> Embed synchronization.  
+**Goal**: Let DMs approve or decline players before they join quests.
+**Scope**: Request button, review panel, Accept and Decline updates, embed refresh.
+**Out of Scope**: Automated waitlisting, capacity caps.
+**Dependencies**: Mongo signups, FastAPI signup endpoints.
+**Milestones**: Request flow -> Review UI -> Accept and Decline actions -> Embed synchronization.
 **Non-Functional Notes**: Maintain duplicate prevention, role checks, and comprehensive logging.
 
 #### Story EP2-S1 - Request to Join
@@ -231,11 +221,11 @@ Deliver a guild-friendly Discord companion that streamlines the full quest lifec
   - [ ] Admin and staff need `/lookup` updates and refreshed demo docs for onboarding.
 
 ### EP3 - Nudge Button (Priority P1, Status: Complete)
-**Goal**: Give DMs a cooldown-respecting quest bump.  
-**Scope**: DM-only button, bump message, cooldown tracking.  
-**Out of Scope**: Automated player reminders.  
-**Dependencies**: Quest embed builder, Mongo quest fields.  
-**Milestones**: Button visibility -> Cooldown enforcement -> Logging.  
+**Goal**: Give DMs a cooldown-respecting quest bump.
+**Scope**: DM-only button, bump message, cooldown tracking.
+**Out of Scope**: Automated player reminders.
+**Dependencies**: Quest embed builder, Mongo quest fields.
+**Milestones**: Button visibility -> Cooldown enforcement -> Logging.
 **Non-Functional Notes**: Enforce 48-hour cooldown and maintain idempotent telemetry.
 
 #### Story EP3-S1 - DM-Only Nudge Button
@@ -272,11 +262,11 @@ Deliver a guild-friendly Discord companion that streamlines the full quest lifec
   - [x] Update moderation SOP documentation.
 
 ### EP4 - Friendly Player Registration Flow (Deferred)
-**Goal**: Onboard first-time players without friction.  
-**Scope**: Character detection, quick-create modal, auto-continue signup.  
-**Out of Scope**: Full character profile capture in the quick flow.  
-**Dependencies**: Characters repository, quest signup interactions.  
-**Milestones**: Detection -> Modal -> Persist -> Continue signup.  
+**Goal**: Onboard first-time players without friction.
+**Scope**: Character detection, quick-create modal, auto-continue signup.
+**Out of Scope**: Full character profile capture in the quick flow.
+**Dependencies**: Characters repository, quest signup interactions.
+**Milestones**: Detection -> Modal -> Persist -> Continue signup.
 **Non-Functional Notes**: Require minimal fields, ensure owner scoping, handle errors gracefully.
 
 #### Story EP4-S1 - Detect Missing Characters
@@ -324,11 +314,11 @@ Deliver a guild-friendly Discord companion that streamlines the full quest lifec
   - [ ] Update docs describing dropdown behavior.
 
 ### EP5 - Simple UI Improvements (Priority P3, Status: Partially Complete)
-**Goal**: Polish embeds and interactions without altering business logic.  
-**Scope**: Emoji headers, state cues, thread previews, ephemeral confirmations.  
-**Out of Scope**: Discord theming beyond defaults.  
-**Dependencies**: Embed builder, quest lifecycle handlers.  
-**Milestones**: Embed polish -> Role gating -> State cues -> Thread previews.  
+**Goal**: Polish embeds and interactions without altering business logic.
+**Scope**: Emoji headers, state cues, thread previews, ephemeral confirmations.
+**Out of Scope**: Discord theming beyond defaults.
+**Dependencies**: Embed builder, quest lifecycle handlers.
+**Milestones**: Embed polish -> Role gating -> State cues -> Thread previews.
 **Non-Functional Notes**: Avoid regressions on existing commands.
 
 #### Story EP5-S1 - Emoji Section Headers
@@ -376,11 +366,11 @@ Deliver a guild-friendly Discord companion that streamlines the full quest lifec
   - [ ] Handle permission failures gracefully.
 
 ### EP6 - `/lookup` Command (Priority P2, Status: Complete)
-**Goal**: Offer lightweight reference search for staff.  
-**Scope**: Add, get, list, and remove commands with per-guild storage.  
-**Out of Scope**: Full-text fuzzy search beyond basic matching.  
-**Dependencies**: Mongo collection, new bot cog.  
-**Milestones**: Storage schema -> Command set -> Pagination -> Auditing.  
+**Goal**: Offer lightweight reference search for staff.
+**Scope**: Add, get, list, and remove commands with per-guild storage.
+**Out of Scope**: Full-text fuzzy search beyond basic matching.
+**Dependencies**: Mongo collection, new bot cog.
+**Milestones**: Storage schema -> Command set -> Pagination -> Auditing.
 **Non-Functional Notes**: Keep commands role-guarded with reliable responses.
 
 #### Story EP6-S1 - Add Lookup Entries
@@ -401,11 +391,11 @@ Deliver a guild-friendly Discord companion that streamlines the full quest lifec
 - [x] Audit logging records removals.
 
 ### EP7 - External Quest IDs (Priority P1, Status: In Progress)
-**Goal**: Preserve readable quest IDs while migrating entities to the new postal-style format across API, bot, and demo tooling.  
-**Scope**: Postal generator, repository filters, logging alignment, demo seeding, regression tests.  
-**Out of Scope**: Changing entity prefixes or removing legacy numeric parsing.  
-**Dependencies**: `EntityID` model, Mongo repositories, quest and character cogs, demo commands, telemetry logging.  
-**Milestones**: Generator and compatibility -> Persistence rewrite -> Logging cleanup -> Regression suite.  
+**Goal**: Preserve readable quest IDs while migrating entities to the new postal-style format across API, bot, and demo tooling.
+**Scope**: Postal generator, repository filters, logging alignment, demo seeding, regression tests.
+**Out of Scope**: Changing entity prefixes or removing legacy numeric parsing.
+**Dependencies**: `EntityID` model, Mongo repositories, quest and character cogs, demo commands, telemetry logging.
+**Milestones**: Generator and compatibility -> Persistence rewrite -> Logging cleanup -> Regression suite.
 **Non-Functional Notes**: Detect collisions, maintain backward compatibility, avoid Mongo `_id` leakage.
 
 #### Story EP7-S1 - Postal IDs End-to-End

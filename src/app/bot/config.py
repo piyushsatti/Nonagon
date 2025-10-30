@@ -19,14 +19,6 @@ BOT_FLUSH_VIA_ADAPTER = os.getenv("BOT_FLUSH_VIA_ADAPTER", "false").lower() in {
 
 QUEST_API_BASE_URL = os.getenv("QUEST_API_BASE_URL")
 
-_forge_ids_raw = os.getenv("QUEST_FORGE_CHANNEL_IDS", "")
-FORGE_CHANNEL_IDS = {
-    int(token)
-    for part in _forge_ids_raw.split(",")
-    for token in [part.strip()]
-    if token
-}
-
 board_id_raw = os.getenv("QUEST_BOARD_CHANNEL_ID")
 try:
     QUEST_BOARD_CHANNEL_ID: Optional[int] = int(board_id_raw) if board_id_raw else None

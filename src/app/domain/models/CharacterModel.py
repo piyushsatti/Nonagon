@@ -25,6 +25,9 @@ class Character:
     art_link: str
     guild_id: int | None = None
     status: CharacterRole = CharacterRole.ACTIVE
+    announcement_channel_id: int | None = None
+    announcement_message_id: int | None = None
+    onboarding_thread_id: int | None = None
 
     # Telemetry
     created_at: datetime = None

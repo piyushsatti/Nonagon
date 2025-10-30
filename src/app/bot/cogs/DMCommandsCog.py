@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from typing import Optional
 
 import discord
@@ -8,6 +7,10 @@ from discord import app_commands
 from discord.ext import commands
 
 from app.domain.models.UserModel import User
+from app.bot.utils.logging import get_logger
+
+
+logger = get_logger(__name__)
 
 
 class DMCommandsCog(commands.Cog):
@@ -46,12 +49,12 @@ class DMCommandsCog(commands.Cog):
 
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            user = await self._get_or_create_user(interaction.user)
+            await self._get_or_create_user(interaction.user)
         except ValueError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
             return
         except Exception as exc:  # pragma: no cover - DM edge cases
-            logging.exception("Failed to register user via DM: %s", exc)
+            logger.exception("Failed to register user via DM: %s", exc)
             await interaction.followup.send(
                 "Something went wrong while setting up your profile. Please try again later.",
                 ephemeral=True,
@@ -61,8 +64,9 @@ class DMCommandsCog(commands.Cog):
         message = (
             "Your demo profile is active!\n\n"
             "Available commands:\n"
-            "• `/character_add` – create a character\n"
-            "• `/createquest` – schedule a quest (referees)\n"
+            "• `/character create` – create a character\n"
+            "• `/quest create` – start a quest draft (referees)\n"
+            "• `/summary create` – share a quest recap (players)\n"
             "• `/stats` – view engagement metrics\n"
             "• `/nudges enable|disable` – control reminders\n"
         )

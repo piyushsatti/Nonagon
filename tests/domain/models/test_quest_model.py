@@ -98,4 +98,3 @@ def test_validate_quest_duration_and_image_rules(now):
     q.image_url = "ftp://bad.example"
     with pytest.raises(ValueError):
         q.validate_quest()
-
