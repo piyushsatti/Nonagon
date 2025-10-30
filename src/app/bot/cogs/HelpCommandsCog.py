@@ -17,8 +17,7 @@ class HelpCommandsCog(commands.Cog):
             title="Nonagon — Quickstart",
             description=(
                 "Use slash commands to schedule quests, join signups, and view stats.\n\n"
-                "Popular: `/quest create`, `/summary create`, `/joinquest`, `/character create`, `/stats`, `/leaderboard`.\n"
-                "Visit the demo dashboard at `/demo` (web)."
+                "Popular: `/quest create`, `/summary create`, `/joinquest`, `/character create`, `/stats`, `/leaderboard`."
             ),
             colour=discord.Color.blurple(),
         )
