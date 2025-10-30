@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -12,7 +11,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from app.bot.services import guild_settings_store
-from app.bot.utils.log_stream import send_demo_log
+from app.bot.utils.logging import get_logger
 from app.bot.cogs._staff_utils import is_allowed_staff
 from app.domain.models.CharacterModel import Character, CharacterRole
 from app.domain.models.EntityIDModel import CharacterID, UserID
@@ -20,6 +19,9 @@ from app.domain.models.UserModel import User
 from app.infra.mongo.guild_adapter import upsert_character_sync
 from app.bot.config import BOT_FLUSH_VIA_ADAPTER
 from app.infra.serialization import from_bson, to_bson
+
+
+logger = get_logger(__name__)
 
 
 class CharacterCommandsCog(commands.Cog):
@@ -105,7 +107,7 @@ class CharacterCommandsCog(commands.Cog):
         except discord.Forbidden:
             return "I lack permission to edit the announcement message."
         except discord.HTTPException as exc:
-            logging.exception(
+            logger.exception(
                 "Failed to fetch announcement message %s/%s: %s",
                 channel_id,
                 message_id,
@@ -117,7 +119,7 @@ class CharacterCommandsCog(commands.Cog):
         try:
             await message.edit(embed=embed)
         except discord.HTTPException as exc:
-            logging.exception("Failed to edit character announcement message: %s", exc)
+            logger.exception("Failed to edit character announcement message: %s", exc)
             return "Failed to update the announcement message."
 
         note: Optional[str] = None
@@ -136,7 +138,7 @@ class CharacterCommandsCog(commands.Cog):
                             reason="Character profile updated",
                         )
                     except discord.HTTPException as exc:
-                        logging.debug("Failed to rename character thread: %s", exc)
+                        logger.debug("Failed to rename character thread: %s", exc)
                         note = (
                             note or ""
                         ) + " Thread rename failed due to missing permissions."
@@ -231,10 +233,15 @@ class CharacterCommandsCog(commands.Cog):
         self._persist_character(interaction.guild.id, character)
         note = await self._update_character_announcement(interaction.guild, character)
 
-        await send_demo_log(
+        actor_display = member.mention
+        await logger.audit(
             self.bot,
             interaction.guild,
-            f"{member.mention} set character `{character.name}` ({character.character_id}) to {self._status_label(character.status)}.",
+            "%s set character `%s` (%s) to %s.",
+            actor_display,
+            character.name,
+            str(character.character_id),
+            self._status_label(character.status),
         )
 
         message = success_message.format(name=character.name)
@@ -542,10 +549,13 @@ class CharacterCommandsCog(commands.Cog):
             await interaction.followup.send(message, ephemeral=True)
             return
 
-        await send_demo_log(
+        await logger.audit(
             self.bot,
             interaction.guild,
-            f"{member.mention} updated character `{result.character.name}` ({result.character.character_id}).",
+            "%s updated character `%s` (%s).",
+            member.mention,
+            result.character.name,
+            str(result.character.character_id),
         )
 
         note = result.note or ""
@@ -1075,7 +1085,7 @@ class CharacterCreationSession(CharacterSessionBase):
         except SessionMessagingError as exc:
             return CharacterCreationResult(False, error=exc.message)
         except Exception as exc:  # pragma: no cover - defensive
-            logging.exception(
+            logger.exception(
                 "Unexpected error during character creation for %s: %s",
                 self.member.id,
                 exc,
@@ -1094,7 +1104,7 @@ class CharacterCreationSession(CharacterSessionBase):
         try:
             user = await self.cog._get_cached_user(self.member)
         except RuntimeError as exc:
-            logging.exception("Failed to resolve user during character create: %s", exc)
+            logger.exception("Failed to resolve user during character create: %s", exc)
             await self._safe_send(
                 "Internal error resolving your profile; please try again later."
             )
@@ -1156,10 +1166,13 @@ class CharacterCreationSession(CharacterSessionBase):
             await self._safe_send(error)
             return CharacterCreationResult(False, error=error)
 
-        await send_demo_log(
+        await logger.audit(
             self.cog.bot,
             self.guild,
-            f"{self.member.mention} created character `{character.name}` ({char_id})",
+            "%s created character `%s` (%s)",
+            self.member.mention,
+            character.name,
+            str(char_id),
         )
 
         thread = None

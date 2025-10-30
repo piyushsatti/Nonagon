@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, List, Optional
 
 import discord
 
-from app.bot.utils.log_stream import send_demo_log
+from app.bot.utils.logging import get_logger
 from app.domain.models.EntityIDModel import CharacterID, QuestID, UserID
 from app.domain.models.QuestModel import PlayerSignUp, PlayerStatus, Quest
 
@@ -14,6 +14,9 @@ if TYPE_CHECKING:
     from app.bot.cogs.QuestCommandsCog import QuestCommandsCog
 
 NO_PENDING_REQUESTS_LABEL = "No pending requests"
+
+
+logger = get_logger(__name__)
 
 
 class JoinQuestModal(discord.ui.Modal):
@@ -415,10 +418,14 @@ class SignupDecisionView(discord.ui.View):
 
         await self._notify_player(signup, accepted=True)
         await self._notify_channel(signup, accepted=True)
-        await send_demo_log(
+        signup_label = self.service.format_signup_label(self.guild.id, signup)
+        await logger.audit(
             self.service.bot,
             self.guild,
-            f"{self.reviewer.mention} accepted {self.service.format_signup_label(self.guild.id, signup)} for `{self.quest.title or self.quest.quest_id}`",
+            "%s accepted %s for `%s`",
+            self.reviewer.mention,
+            signup_label,
+            self.quest.title or self.quest.quest_id,
         )
 
         self._refresh_from_quest()
@@ -468,10 +475,14 @@ class SignupDecisionView(discord.ui.View):
 
         await self._notify_player(signup, accepted=False)
         await self._notify_channel(signup, accepted=False)
-        await send_demo_log(
+        signup_label = self.service.format_signup_label(self.guild.id, signup)
+        await logger.audit(
             self.service.bot,
             self.guild,
-            f"{self.reviewer.mention} declined {self.service.format_signup_label(self.guild.id, signup)} for `{self.quest.title or self.quest.quest_id}`",
+            "%s declined %s for `%s`",
+            self.reviewer.mention,
+            signup_label,
+            self.quest.title or self.quest.quest_id,
         )
 
         self._refresh_from_quest()
@@ -522,10 +533,12 @@ class SignupDecisionView(discord.ui.View):
         )
 
         await self._notify_channel_closed()
-        await send_demo_log(
+        await logger.audit(
             self.service.bot,
             self.guild,
-            f"{self.reviewer.mention} closed signups for `{self.quest.title or self.quest.quest_id}`",
+            "%s closed signups for `%s`",
+            self.reviewer.mention,
+            self.quest.title or self.quest.quest_id,
         )
 
         self._refresh_from_quest()

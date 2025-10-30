@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import logging
 import math
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -15,6 +14,10 @@ from app.domain.models.LookupModel import LookupEntry
 from app.domain.models.UserModel import User
 from app.infra.mongo.lookup_repo import LookupRepoMongo
 from app.bot.cogs._staff_utils import is_allowed_staff
+from app.bot.utils.logging import get_logger
+
+
+logger = get_logger(__name__)
 
 
 class LookupCommandsCog(commands.Cog):
@@ -42,7 +45,7 @@ class LookupCommandsCog(commands.Cog):
             try:
                 await self.bot.tree.sync(guild=target)
             except Exception:  # pragma: no cover - defensive logging
-                logging.exception("Failed to sync lookup removal for guild %s", guild.id)
+                logger.exception("Failed to sync lookup removal for guild %s", guild.id)
 
     async def _sync_lookup_commands(self) -> None:
         await self.bot.wait_until_ready()
@@ -55,7 +58,7 @@ class LookupCommandsCog(commands.Cog):
             self.bot.tree.add_command(self.lookup, guild=target, override=True)
             await self.bot.tree.sync(guild=target)
         except Exception:
-            logging.exception("Failed to sync lookup commands for guild %s", guild_id)
+            logger.exception("Failed to sync lookup commands for guild %s", guild_id)
 
     @staticmethod
     def _guild_object(guild_id: int) -> discord.Object:
@@ -167,7 +170,7 @@ class LookupCommandsCog(commands.Cog):
         entry.touch_updated(member.id, at=now)
         saved = await self.repo.upsert(entry)
 
-        logging.info(
+        logger.info(
             "Lookup entry saved (guild=%s staff=%s name=%s)",
             guild_id,
             member.id,
@@ -224,7 +227,7 @@ class LookupCommandsCog(commands.Cog):
         deleted = await self.repo.delete(interaction.guild.id, name)  # type: ignore[union-attr]
 
         if deleted:
-            logging.info(
+            logger.info(
                 "Lookup entry removed (guild=%s staff=%s name=%s)",
                 interaction.guild.id,
                 member.id,

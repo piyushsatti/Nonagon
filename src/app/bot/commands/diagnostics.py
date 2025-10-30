@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Tuple
 
@@ -10,6 +9,10 @@ from discord import app_commands
 from discord.ext import commands
 
 from app.bot.database import db_client
+from app.bot.utils.logging import get_logger
+
+
+logger = get_logger(__name__)
 
 CRITICAL_PERMISSIONS = [
     "send_messages",
@@ -41,7 +44,7 @@ class Diagnostics(commands.Cog):
     async def _send_failure(
         self, interaction: discord.Interaction, command: str, error: Exception
     ) -> None:
-        logging.exception("Diagnostics command %s failed: %s", command, error)
+        logger.exception("Diagnostics command %s failed: %s", command, error)
         embed = self._make_embed("Diagnostics Error", f"{command}: {error}")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -66,7 +69,7 @@ class Diagnostics(commands.Cog):
             try:
                 db_client.admin.command("ping")
             except Exception as exc:  # pragma: no cover - defensive logging
-                logging.exception("MongoDB ping failed: %s", exc)
+                logger.exception("MongoDB ping failed: %s", exc)
                 return False, str(exc)
             return True, "OK"
 
@@ -208,7 +211,7 @@ class Diagnostics(commands.Cog):
                         }
                         return entry["db"].users.count_documents(match)
                     except Exception as exc:  # pragma: no cover - defensive logging
-                        logging.exception(
+                        logger.exception(
                             "Failed counting users for guild %s: %s", guild_id, exc
                         )
                         return None
