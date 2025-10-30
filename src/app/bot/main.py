@@ -6,12 +6,16 @@ from typing import Any
 import discord
 from discord.ext import commands
 
+from app.bot.utils.logging import get_logger
 from app.infra.mongo.guild_adapter import upsert_user_sync
 from app.infra.serialization import to_bson
 
 from ..domain.models.UserModel import User
 from .config import BOT_FLUSH_VIA_ADAPTER, BOT_TOKEN
 from .database import db_client
+
+
+logger = get_logger(__name__)
 
 
 class Nonagon(commands.Bot):
@@ -41,49 +45,50 @@ class Nonagon(commands.Bot):
             try:
                 await self.load_extension(ext)
                 loaded.append(ext)
-                logging.info(f"Loaded extension {ext}")
+                logger.info("Loaded extension %s", ext)
             except Exception:
                 import traceback as _tb
 
                 failed[ext] = _tb.format_exc()
-                logging.error("Error loading extension %s:\n%s", ext, failed[ext])
+                logger.error("Error loading extension %s:\n%s", ext, failed[ext])
 
         diagnostics_ext = "app.bot.commands.diagnostics"
         if diagnostics_ext not in self.extensions:
             try:
                 await self.load_extension(diagnostics_ext)
                 loaded.append(diagnostics_ext)
-                logging.info("Loaded extension %s", diagnostics_ext)
+                logger.info("Loaded extension %s", diagnostics_ext)
             except Exception:
                 import traceback as _tb
 
                 failed[diagnostics_ext] = _tb.format_exc()
-                logging.error(
+                logger.error(
                     "Error loading extension %s:\n%s",
                     diagnostics_ext,
                     failed[diagnostics_ext],
                 )
 
         # Cog loader audit summary
-        logging.info("Cog loader audit: %d loaded, %d failed", len(loaded), len(failed))
+        logger.info("Cog loader audit: %d loaded, %d failed", len(loaded), len(failed))
         if loaded:
-            logging.info("Loaded cogs: %s", ", ".join(sorted(loaded)))
+            logger.info("Loaded cogs: %s", ", ".join(sorted(loaded)))
         if failed:
             for ext, tb in failed.items():
-                logging.debug("Failed cog %s trace:\n%s", ext, tb)
+                logger.debug("Failed cog %s trace:\n%s", ext, tb)
 
         try:
             self.loop.create_task(self._auto_persist_loop())
         except Exception as e:
-            logging.error(f"Auto persist loop encountered an error: {e}")
+            logger.error("Auto persist loop encountered an error: %s", e)
 
         # Call the parent setup_hook to ensure all cogs are loaded
         await super().setup_hook()
 
     # Called to login and connect the bot to Discord
     async def start(self, BOT_TOKEN):
-        async def _idle_forever(reason: str) -> None:
-            logging.error(
+        async def _idle_forever(reason_template: str, *args: Any) -> None:
+            reason = reason_template % args if args else reason_template
+            logger.error(
                 "%s. Bot will remain idle until restarted with valid credentials.",
                 reason,
             )
@@ -94,57 +99,49 @@ class Nonagon(commands.Bot):
         placeholders = {"", "replace_me"}
 
         if normalized.lower() in placeholders:
-            await _idle_forever(
-                "BOT_TOKEN is missing or still set to the placeholder value"
-            )
-            return
+            logging.error("BOT_TOKEN is missing or still set to the placeholder value.")
+            raise SystemExit(1)
 
         try:
             await super().start(normalized)
         except discord.LoginFailure as exc:
-            await _idle_forever(f"Discord login failed: {exc}")
+            await _idle_forever("Discord login failed: %s", exc)
         except discord.HTTPException as exc:
-            await _idle_forever(f"Discord HTTP error during startup: {exc}")
+            await _idle_forever("Discord HTTP error during startup: %s", exc)
         except Exception as exc:  # pragma: no cover - defensive fallback
-            await _idle_forever(f"Unexpected error during startup: {exc}")
+            await _idle_forever("Unexpected error during startup: %s", exc)
 
     # Called when the bot is ready
     async def on_ready(self):
         await self._load_cache()
         tree_commands = [cmd.qualified_name for cmd in self.tree.get_commands()]
-        logging.info("Logged in as %s (ID: %s)", self.user, self.user.id)
-        logging.info("Loaded cogs: %s", ", ".join(sorted(self.cogs.keys())))
-        logging.info("Slash commands: %s", ", ".join(sorted(tree_commands)))
+        logger.info("Logged in as %s (ID: %s)", self.user, self.user.id)
+        logger.info("Loaded cogs: %s", ", ".join(sorted(self.cogs.keys())))
+        logger.info("Slash commands: %s", ", ".join(sorted(tree_commands)))
 
     async def on_error(self, event_method, /, *args, **kwargs):
         await super().on_error(event_method, *args, **kwargs)
 
     def _ensure_guild_entry(self, guild_id: int) -> dict[str, Any]:
-        entry = self.guild_data.get(guild_id)
-        if entry is None:
-            entry = {
-                "guild_id": guild_id,
-                "db": db_client.get_database(str(guild_id)),
-                "users": {},
-                "quests": {},
-                "characters": {},
-                "summaries": {},
-            }
-            self.guild_data[guild_id] = entry
-        else:
-            entry.setdefault("guild_id", guild_id)
-            entry.setdefault("db", db_client.get_database(str(guild_id)))
-            entry.setdefault("users", {})
-            entry.setdefault("quests", {})
-            entry.setdefault("characters", {})
-            entry.setdefault("summaries", {})
+        defaults = {
+            "guild_id": guild_id,
+            "db": db_client.get_database(str(guild_id)),
+            "users": {},
+            "quests": {},
+            "characters": {},
+            "summaries": {},
+        }
+        entry = self.guild_data.setdefault(guild_id, defaults)
+        for key, value in defaults.items():
+            entry.setdefault(key, value)
+        entry["guild_id"] = guild_id
         return entry
 
     async def _load_cache(self):
-        logging.info("Loading guild caches…")
+        logger.info("Loading guild caches…")
         tasks = [self.load_or_create_guild_cache(g) for g in self.guilds]
         await asyncio.gather(*tasks)
-        logging.info("All guild caches ready.")
+        logger.info("All guild caches ready.")
 
     async def _auto_persist_loop(self):
         """Periodically flush *all* in-memory user caches back to MongoDB."""
@@ -156,13 +153,13 @@ class Nonagon(commands.Bot):
                     gid, uid = self.dirty_data.get_nowait()
                     guild_entry = self.guild_data.get(gid)
                     if guild_entry is None:
-                        logging.debug(
+                        logger.debug(
                             "Skipping flush for gid=%s uid=%s (no guild cache)", gid, uid
                         )
                         continue
                     user = guild_entry.get("users", {}).get(uid)
                     if user is None:
-                        logging.debug(
+                        logger.debug(
                             "Skipping flush for gid=%s uid=%s (user missing in cache)",
                             gid,
                             uid,
@@ -178,7 +175,7 @@ class Nonagon(commands.Bot):
             for (gid, uid), user in to_flush.items():
                 guild_entry = self.guild_data.get(gid)
                 if guild_entry is None:
-                    logging.debug(
+                    logger.debug(
                         "Skipping flush for gid=%s uid=%s (guild missing)", gid, uid
                     )
                     continue
@@ -200,11 +197,11 @@ class Nonagon(commands.Bot):
                             {"$set": payload},
                             upsert=True,
                         )
-                    logging.debug(
+                    logger.debug(
                         "Persisted gid=%s uid=%s as user_id=%s", gid, uid, user.user_id
                     )
                 except Exception as exc:  # pragma: no cover - defensive logging
-                    logging.exception(
+                    logger.exception(
                         "Failed to persist gid=%s uid=%s user_id=%s: %s",
                         gid,
                         uid,
@@ -225,17 +222,17 @@ class Nonagon(commands.Bot):
                     guild_obj = discord.Object(id=guild_id)
                     self.tree.copy_global_to(guild=guild_obj)
                     scoped_commands = await self.tree.sync(guild=guild_obj)
-                    logging.info(
+                    logger.info(
                         "Synced %d slash commands to guild %s",
                         len(scoped_commands),
                         guild_id,
                     )
                 except Exception:
-                    logging.exception(
+                    logger.exception(
                         "Failed to sync application commands for guild %s", guild_id
                     )
         except Exception:
-            logging.exception("Failed to sync application commands")
+            logger.exception("Failed to sync application commands")
 
     async def load_or_create_guild_cache(self, guild: discord.Guild) -> None:
         db_name = f"{guild.id}"
@@ -243,7 +240,7 @@ class Nonagon(commands.Bot):
         g_db = entry["db"]
 
         if db_name in db_client.list_database_names():
-            logging.info(f"Loading cached users for {guild.name}")
+            logger.info("Loading cached users for %s", guild.name)
             users: dict[int, User] = {}
             found_with_guild = False
             primary_cursor = g_db.users.find({"guild_id": guild.id}, {"_id": 0})
@@ -253,7 +250,7 @@ class Nonagon(commands.Bot):
                 user.guild_id = guild.id
                 raw_key = doc.get("discord_id") or user.discord_id
                 if raw_key is None:
-                    logging.debug(
+                    logger.debug(
                         "Skipping cached user with missing discord_id (guild=%s, user_id=%s)",
                         guild.id,
                         user.user_id,
@@ -262,7 +259,7 @@ class Nonagon(commands.Bot):
                 try:
                     key = int(raw_key)
                 except (TypeError, ValueError):
-                    logging.debug(
+                    logger.debug(
                         "Skipping cached user with non-numeric discord_id=%s (guild=%s, user_id=%s)",
                         raw_key,
                         guild.id,
@@ -278,7 +275,7 @@ class Nonagon(commands.Bot):
                     user.guild_id = guild.id
                     raw_key = doc.get("discord_id") or user.discord_id
                     if raw_key is None:
-                        logging.debug(
+                        logger.debug(
                             "Skipping legacy user with missing discord_id (guild=%s, user_id=%s)",
                             guild.id,
                             user.user_id,
@@ -287,7 +284,7 @@ class Nonagon(commands.Bot):
                     try:
                         key = int(raw_key)
                     except (TypeError, ValueError):
-                        logging.debug(
+                        logger.debug(
                             "Skipping legacy user with non-numeric discord_id=%s (guild=%s, user_id=%s)",
                             raw_key,
                             guild.id,
@@ -301,11 +298,13 @@ class Nonagon(commands.Bot):
                 self.guild_data[guild.id] = entry
                 return
             # Fallback: DB exists but users collection is empty; scrape members
-            logging.info(
+            logger.info(
                 "No users found in DB for %s; scraping members as fallback", guild.name
             )
 
-        logging.info(f"Scraping {guild.name} ({guild.member_count} members)...")
+        logger.info(
+            "Scraping %s (%s members)...", guild.name, guild.member_count
+        )
         snapshot: list[discord.Member] = list(guild.members)
         users = {m.id: User.from_member(m) for m in snapshot if not m.bot}
         for user in users.values():
@@ -323,7 +322,7 @@ class Nonagon(commands.Bot):
         if docs:
             await asyncio.to_thread(entry["db"].users.insert_many, docs)
 
-        logging.info(
+        logger.info(
             "Initial cache and DB created for %s - %d users", guild.name, len(users)
         )
 
@@ -336,7 +335,7 @@ if __name__ == "__main__":
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
     except Exception as exc:  # pragma: no cover - defensive logging
-        logging.warning("Unable to create log directory %s: %s", log_dir, exc)
+        logger.warning("Unable to create log directory %s: %s", log_dir, exc)
     else:
         file_handler = logging.FileHandler(log_dir / "bot.log", mode="w")
         file_handler.setLevel(logging.INFO)

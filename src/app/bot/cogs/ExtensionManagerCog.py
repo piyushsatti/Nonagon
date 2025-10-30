@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import importlib
-import logging
 from typing import Iterable
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from app.bot.utils.log_stream import send_demo_log
+from app.bot.utils.logging import get_logger
 
 
 def _iter_extensions(bot: commands.Bot) -> Iterable[str]:
     return sorted(bot.extensions.keys())
+
+
+logger = get_logger(__name__)
 
 
 class ExtensionManagerCog(commands.Cog):
@@ -28,17 +30,24 @@ class ExtensionManagerCog(commands.Cog):
         try:
             await self.bot.load_extension(extension)
         except Exception as exc:
-            logging.exception("Failed to load extension %s", extension)
+            logger.exception("Failed to load extension %s", extension)
             await interaction.followup.send(
                 f"Unable to load `{extension}`: {exc}", ephemeral=True
             )
             return
 
         if interaction.guild is not None:
-            await send_demo_log(
+            actor_display = (
+                interaction.user.mention
+                if isinstance(interaction.user, discord.Member)
+                else str(interaction.user)
+            )
+            await logger.audit(
                 interaction.client,
                 interaction.guild,
-                f"Extension `{extension}` loaded by {interaction.user.mention if isinstance(interaction.user, discord.Member) else interaction.user}",
+                "Extension `%s` loaded by %s",
+                extension,
+                actor_display,
             )
         await interaction.followup.send(
             f"Loaded extension `{extension}`", ephemeral=True
@@ -52,17 +61,24 @@ class ExtensionManagerCog(commands.Cog):
         try:
             await self.bot.unload_extension(extension)
         except Exception as exc:
-            logging.exception("Failed to unload extension %s", extension)
+            logger.exception("Failed to unload extension %s", extension)
             await interaction.followup.send(
                 f"Unable to unload `{extension}`: {exc}", ephemeral=True
             )
             return
 
         if interaction.guild is not None:
-            await send_demo_log(
+            actor_display = (
+                interaction.user.mention
+                if isinstance(interaction.user, discord.Member)
+                else str(interaction.user)
+            )
+            await logger.audit(
                 interaction.client,
                 interaction.guild,
-                f"Extension `{extension}` unloaded by {interaction.user.mention if isinstance(interaction.user, discord.Member) else interaction.user}",
+                "Extension `%s` unloaded by %s",
+                extension,
+                actor_display,
             )
         await interaction.followup.send(
             f"Unloaded extension `{extension}`", ephemeral=True
@@ -77,17 +93,24 @@ class ExtensionManagerCog(commands.Cog):
             importlib.reload(importlib.import_module(extension))
             await self.bot.reload_extension(extension)
         except Exception as exc:
-            logging.exception("Failed to reload extension %s", extension)
+            logger.exception("Failed to reload extension %s", extension)
             await interaction.followup.send(
                 f"Unable to reload `{extension}`: {exc}", ephemeral=True
             )
             return
 
         if interaction.guild is not None:
-            await send_demo_log(
+            actor_display = (
+                interaction.user.mention
+                if isinstance(interaction.user, discord.Member)
+                else str(interaction.user)
+            )
+            await logger.audit(
                 interaction.client,
                 interaction.guild,
-                f"Extension `{extension}` reloaded by {interaction.user.mention if isinstance(interaction.user, discord.Member) else interaction.user}",
+                "Extension `%s` reloaded by %s",
+                extension,
+                actor_display,
             )
         await interaction.followup.send(
             f"Reloaded extension `{extension}`", ephemeral=True
@@ -98,12 +121,12 @@ class ExtensionManagerCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         exts = list(_iter_extensions(self.bot))
         if not exts:
-            logging.info("No extensions loaded.")
+            logger.info("No extensions loaded.")
             await interaction.followup.send("No extensions loaded.", ephemeral=True)
             return
 
         formatted = "\n".join(exts)
-        logging.info("Loaded extensions: %s", formatted)
+        logger.info("Loaded extensions: %s", formatted)
         await interaction.followup.send(
             f"Loaded extensions:\n{formatted}", ephemeral=True
         )

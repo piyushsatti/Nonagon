@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-import logging
 from typing import Optional
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from app.bot.utils.logging import get_logger
+
+
+logger = get_logger(__name__)
 
 class AdminCommandsCog(commands.Cog):
     """Administrative slash commands for rapid iteration helpers."""
@@ -34,7 +37,7 @@ class AdminCommandsCog(commands.Cog):
                 commands_synced = await self.bot.tree.sync(guild=guild_obj)
                 results.append(f"{guild_id}: {len(commands_synced)} commands")
             except Exception as exc:  # pragma: no cover - defensive logging
-                logging.exception("Failed to sync commands for guild %s", guild_id)
+                logger.exception("Failed to sync commands for guild %s", guild_id)
                 results.append(f"{guild_id}: failed ({exc})")
         return results
 

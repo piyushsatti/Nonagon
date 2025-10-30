@@ -10,8 +10,17 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from app.bot.character import (
+    CharacterConfirmView,
+    CharacterLinkView,
+    CharacterCreationSession,
+    CharacterUpdateSession,
+    build_character_embed,
+    build_character_embed_from_model,
+    status_label,
+)
 from app.bot.services import guild_settings_store
-from app.bot.utils.log_stream import send_demo_log
+from app.bot.utils.logging import get_logger
 from app.bot.cogs._staff_utils import is_allowed_staff
 from app.bot.ui.wizards import (
     ContextAwareModal,
@@ -28,6 +37,9 @@ from app.domain.models.UserModel import User
 from app.infra.mongo.guild_adapter import upsert_character_sync
 from app.bot.config import BOT_FLUSH_VIA_ADAPTER
 from app.infra.serialization import from_bson, to_bson
+
+
+logger = get_logger(__name__)
 
 
 class CharacterCommandsCog(commands.Cog):
@@ -113,7 +125,7 @@ class CharacterCommandsCog(commands.Cog):
         except discord.Forbidden:
             return "I lack permission to edit the announcement message."
         except discord.HTTPException as exc:
-            logging.exception(
+            logger.exception(
                 "Failed to fetch announcement message %s/%s: %s",
                 channel_id,
                 message_id,
@@ -125,7 +137,7 @@ class CharacterCommandsCog(commands.Cog):
         try:
             await message.edit(embed=embed)
         except discord.HTTPException as exc:
-            logging.exception("Failed to edit character announcement message: %s", exc)
+            logger.exception("Failed to edit character announcement message: %s", exc)
             return "Failed to update the announcement message."
 
         note: Optional[str] = None
@@ -144,7 +156,7 @@ class CharacterCommandsCog(commands.Cog):
                             reason="Character profile updated",
                         )
                     except discord.HTTPException as exc:
-                        logging.debug("Failed to rename character thread: %s", exc)
+                        logger.debug("Failed to rename character thread: %s", exc)
                         note = (
                             note or ""
                         ) + " Thread rename failed due to missing permissions."
@@ -239,10 +251,15 @@ class CharacterCommandsCog(commands.Cog):
         self._persist_character(interaction.guild.id, character)
         note = await self._update_character_announcement(interaction.guild, character)
 
-        await send_demo_log(
+        actor_display = member.mention
+        await logger.audit(
             self.bot,
             interaction.guild,
-            f"{member.mention} set character `{character.name}` ({character.character_id}) to {self._status_label(character.status)}.",
+            "%s set character `%s` (%s) to %s.",
+            actor_display,
+            character.name,
+            str(character.character_id),
+            self._status_label(character.status),
         )
 
         message = success_message.format(name=character.name)
@@ -253,7 +270,7 @@ class CharacterCommandsCog(commands.Cog):
 
     @staticmethod
     def _status_label(status: CharacterRole) -> str:
-        return "Active" if status is CharacterRole.ACTIVE else "Retired"
+        return status_label(status)
 
     def _build_character_embed(
         self,
@@ -268,58 +285,21 @@ class CharacterCommandsCog(commands.Cog):
         status: CharacterRole,
         updated_at: Optional[datetime] = None,
     ) -> discord.Embed:
-        colour = (
-            discord.Color.blurple()
-            if status is CharacterRole.ACTIVE
-            else discord.Color.dark_grey()
+        return build_character_embed(
+            name=name,
+            ddb_link=ddb_link,
+            character_thread_link=character_thread_link,
+            token_link=token_link,
+            art_link=art_link,
+            description=description,
+            tags=tags,
+            status=status,
+            updated_at=updated_at,
         )
-        embed = discord.Embed(
-            title=name or "Unnamed Character",
-            description=description or "No description provided.",
-            colour=colour,
-            timestamp=updated_at or datetime.now(timezone.utc),
-        )
-        embed.add_field(
-            name="Sheet",
-            value=ddb_link or "Not set",
-            inline=False,
-        )
-        embed.add_field(
-            name="Character Thread",
-            value=character_thread_link or "Not set",
-            inline=False,
-        )
-        embed.add_field(
-            name="Token",
-            value=token_link or "Not set",
-            inline=False,
-        )
-        embed.add_field(
-            name="Status",
-            value=self._status_label(status),
-            inline=False,
-        )
-        if tags:
-            embed.add_field(
-                name="Tags",
-                value=", ".join(f"`{tag}`" for tag in tags),
-                inline=False,
-            )
-        if art_link:
-            embed.set_image(url=art_link)
-        return embed
 
     def _build_character_embed_from_model(self, character: Character) -> discord.Embed:
-        return self._build_character_embed(
-            name=character.name,
-            ddb_link=character.ddb_link,
-            character_thread_link=character.character_thread_link,
-            token_link=character.token_link,
-            art_link=character.art_link,
-            description=character.description,
-            tags=character.tags or [],
-            status=character.status,
-            updated_at=datetime.now(timezone.utc),
+        return build_character_embed_from_model(
+            character, updated_at=datetime.now(timezone.utc)
         )
 
     @staticmethod
@@ -550,10 +530,13 @@ class CharacterCommandsCog(commands.Cog):
             await interaction.followup.send(message, ephemeral=True)
             return
 
-        await send_demo_log(
+        await logger.audit(
             self.bot,
             interaction.guild,
-            f"{member.mention} updated character `{result.character.name}` ({result.character.character_id}).",
+            "%s updated character `%s` (%s).",
+            member.mention,
+            result.character.name,
+            str(result.character.character_id),
         )
 
         note = result.note or ""
@@ -1415,7 +1398,7 @@ class CharacterTagsModal(
         try:
             user = await self.cog._get_cached_user(self.member)
         except RuntimeError as exc:
-            logging.exception("Failed to resolve user during character create: %s", exc)
+            logger.exception("Failed to resolve user during character create: %s", exc)
             await self._safe_send(
                 "Internal error resolving your profile; please try again later."
             )
@@ -1478,10 +1461,13 @@ class CharacterTagsModal(
             await self._safe_send(error)
             return CharacterCreationResult(False, error=error)
 
-        await send_demo_log(
+        await logger.audit(
             self.cog.bot,
             self.guild,
-            f"{self.member.mention} created character `{character.name}` ({char_id})",
+            "%s created character `%s` (%s)",
+            self.member.mention,
+            character.name,
+            str(char_id),
         )
 
         thread = None
@@ -1909,7 +1895,6 @@ class CharacterUpdateSession(CharacterSessionBase):
         if len(tags) > 20:
             raise ValueError("Please provide 20 or fewer tags.")
         return ", ".join(tags)
-
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(CharacterCommandsCog(bot))

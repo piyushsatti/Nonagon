@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from typing import Dict, Optional
-import logging
 
 import discord
 from discord import app_commands
@@ -15,6 +14,10 @@ from app.bot.services import guild_settings_store
 from app.domain.models.UserModel import User
 from app.infra.mongo.guild_adapter import upsert_user_sync
 from app.infra.mongo.users_repo import UsersRepoMongo
+from app.bot.utils.logging import get_logger
+
+
+logger = get_logger(__name__)
 
 
 class SetupCommandsCog(commands.Cog):
@@ -405,7 +408,7 @@ class SetupCommandsCog(commands.Cog):
             )
             return
         except PyMongoError as exc:
-            logging.exception(
+            logger.exception(
                 "Failed to refresh guild cache for guild %s due to database error: %s",
                 guild.id,
                 exc,

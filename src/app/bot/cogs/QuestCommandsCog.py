@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from contextlib import suppress
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Literal
 
@@ -19,6 +17,8 @@ from app.bot.config import (
     QUEST_API_BASE_URL,
     QUEST_BOARD_CHANNEL_ID,
 )
+from app.bot.quest import build_nudge_embed, build_quest_embed
+from app.bot.quest import commands as quest_commands
 from app.bot.quest.views import QuestSignupView
 from app.bot.ui.wizards import (
     ContextAwareModal,
@@ -29,7 +29,7 @@ from app.bot.ui.wizards import (
     parse_positive_hours,
 )
 from app.bot.services import guild_settings_store
-from app.bot.utils.log_stream import send_demo_log
+from app.bot.utils.logging import get_logger
 from app.bot.utils.quest_embeds import (
     QuestEmbedData,
     QuestEmbedRoster,
@@ -44,6 +44,9 @@ from app.infra.mongo.users_repo import UsersRepoMongo
 from app.infra.serialization import to_bson
 
 
+logger = get_logger(__name__)
+
+
 class QuestCommandsCog(commands.Cog):
     """Slash commands for quest lifecycle management."""
 
@@ -53,7 +56,7 @@ class QuestCommandsCog(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self._demo_log = send_demo_log
+        self._demo_log = logger.audit
         self._users_repo = UsersRepoMongo()
         self._active_quest_sessions: set[int] = set()
         self._quest_scheduler_task: Optional[asyncio.Task[None]] = None
@@ -75,7 +78,7 @@ class QuestCommandsCog(commands.Cog):
 
     # ---------- Quest Embed Helpers ----------
 
-    def _lookup_user_display(self, guild_id: int, user_id: UserID) -> str:
+    def lookup_user_display(self, guild_id: int, user_id: UserID) -> str:
         guild_entry = self.bot.guild_data.get(guild_id)
         if guild_entry:
             for cached in guild_entry.get("users", {}).values():
@@ -88,100 +91,12 @@ class QuestCommandsCog(commands.Cog):
                     continue
         return str(user_id)
 
+    def _lookup_user_display(self, guild_id: int, user_id: UserID) -> str:
+        return self.lookup_user_display(guild_id, user_id)
+
     def _format_signup_label(self, guild_id: int, signup: PlayerSignUp) -> str:
-        user_display = self._lookup_user_display(guild_id, signup.user_id)
+        user_display = self.lookup_user_display(guild_id, signup.user_id)
         return f"{user_display} — {str(signup.character_id)}"
-
-    def _quest_to_embed_data(
-        self,
-        quest: Quest,
-        guild: Optional[discord.Guild],
-        *,
-        referee_display: Optional[str] = None,
-        approved_by_display: Optional[str] = None,
-        last_updated_at: Optional[datetime] = None,
-    ) -> QuestEmbedData:
-        roster_selected: list[str] = []
-        roster_pending: list[str] = []
-        for signup in quest.signups:
-            label = (
-                f"{self._lookup_user_display(quest.guild_id, signup.user_id)} — {str(signup.character_id)}"
-            )
-            if signup.status is PlayerStatus.SELECTED:
-                roster_selected.append(label)
-            else:
-                roster_pending.append(label)
-
-        roster = QuestEmbedRoster(selected=roster_selected, pending=roster_pending)
-
-        referee_label = referee_display
-        if referee_label is None:
-            referee_label = self._lookup_user_display(quest.guild_id, quest.referee_id)
-
-        data = QuestEmbedData(
-            quest_id=str(quest.quest_id),
-            title=quest.title,
-            description=quest.description,
-            status=quest.status,
-            starting_at=quest.starting_at,
-            duration=quest.duration,
-            referee_display=referee_label,
-            roster=roster,
-            image_url=quest.image_url,
-            last_updated_at=last_updated_at or datetime.now(timezone.utc),
-            approved_by_display=approved_by_display,
-        )
-        return data
-
-    def _build_quest_embed(
-        self,
-        quest: Quest,
-        guild: Optional[discord.Guild],
-        *,
-        referee_display: Optional[str] = None,
-        approved_by_display: Optional[str] = None,
-        last_updated_at: Optional[datetime] = None,
-    ) -> discord.Embed:
-        data = self._quest_to_embed_data(
-            quest,
-            guild,
-            referee_display=referee_display,
-            approved_by_display=approved_by_display,
-            last_updated_at=last_updated_at,
-        )
-        return build_quest_embed(data)
-
-    def _build_nudge_embed(
-        self,
-        quest: Quest,
-        member: discord.Member,
-        jump_url: str,
-        *,
-        bumped_at: datetime,
-    ) -> discord.Embed:
-        quest_title = quest.title or str(quest.quest_id)
-        embed = discord.Embed(
-            title=f"Quest Nudge: {quest_title}",
-            description=(
-                f"{member.mention} bumped this quest.\n"
-                f"[View announcement]({jump_url})"
-            ),
-            color=discord.Color.gold(),
-            timestamp=bumped_at,
-        )
-
-        if quest.starting_at:
-            start_ts = quest.starting_at
-            if start_ts.tzinfo is None or start_ts.tzinfo.utcoffset(start_ts) is None:
-                start_ts = start_ts.replace(tzinfo=timezone.utc)
-            embed.add_field(
-                name="Start Time",
-                value=f"<t:{int(start_ts.timestamp())}:F>",
-                inline=False,
-            )
-
-        embed.set_footer(text=f"Quest ID: {quest.quest_id}")
-        return embed
 
     async def _resolve_board_channel(
         self, guild: discord.Guild, fallback: discord.TextChannel
@@ -250,9 +165,10 @@ class QuestCommandsCog(commands.Cog):
         quest.status = QuestStatus.ANNOUNCED
         quest.announce_at = None
 
-        embed = self._build_quest_embed(
+        embed = build_quest_embed(
             quest,
             guild,
+            lookup_user_display=self.lookup_user_display,
             referee_display=referee_display,
             approved_by_display=referee_display,
         )
@@ -267,10 +183,12 @@ class QuestCommandsCog(commands.Cog):
         quest.message_id = str(message.id)
         self._persist_quest(guild.id, quest)
 
-        await send_demo_log(
+        await logger.audit(
             self.bot,
             guild,
-            f"Quest `{quest.quest_id}` announced in {target_channel.mention}",
+            "Quest `%s` announced in %s",
+            str(quest.quest_id),
+            target_channel.mention,
         )
 
     def _parse_datetime_input(self, value: str) -> Optional[datetime]:
@@ -298,7 +216,7 @@ class QuestCommandsCog(commands.Cog):
             try:
                 channel = await guild.fetch_channel(int(quest.channel_id))
             except Exception as exc:  # pragma: no cover - defensive log
-                logging.debug(
+                logger.debug(
                     "Unable to resolve quest channel %s in guild %s: %s",
                     quest.channel_id,
                     guild.id,
@@ -309,7 +227,7 @@ class QuestCommandsCog(commands.Cog):
         try:
             message = await channel.fetch_message(int(quest.message_id))
         except Exception as exc:  # pragma: no cover - defensive log
-            logging.debug(
+            logger.debug(
                 "Unable to fetch quest message %s in guild %s: %s",
                 quest.message_id,
                 guild.id,
@@ -317,9 +235,10 @@ class QuestCommandsCog(commands.Cog):
             )
             return
 
-        embed = self._build_quest_embed(
+        embed = build_quest_embed(
             quest,
             guild,
+            lookup_user_display=self.lookup_user_display,
             approved_by_display=approved_by_display,
             last_updated_at=last_updated_at,
         )
@@ -330,7 +249,7 @@ class QuestCommandsCog(commands.Cog):
                 resolved_view = QuestSignupView(self, str(quest.quest_id))
             await message.edit(embed=embed, view=resolved_view)
         except Exception as exc:  # pragma: no cover - defensive log
-            logging.debug(
+            logger.debug(
                 "Unable to update quest announcement %s in guild %s: %s",
                 quest.quest_id,
                 guild.id,
@@ -347,7 +266,7 @@ class QuestCommandsCog(commands.Cog):
             try:
                 await self._run_scheduled_announcements()
             except Exception:  # pragma: no cover - defensive
-                logging.exception("Failed to process scheduled quest announcements")
+                logger.exception("Failed to process scheduled quest announcements")
             await asyncio.sleep(60)
 
     async def _run_scheduled_announcements(self) -> None:
@@ -373,7 +292,7 @@ class QuestCommandsCog(commands.Cog):
                 try:
                     quest = self._quest_from_doc(guild.id, doc)
                 except Exception:
-                    logging.exception(
+                    logger.exception(
                         "Failed to deserialize quest doc for guild %s", guild.id
                     )
                     continue
@@ -386,7 +305,7 @@ class QuestCommandsCog(commands.Cog):
                         guild, quest, invoker=None, fallback_channel=None
                     )
                 except Exception:
-                    logging.exception(
+                    logger.exception(
                         "Scheduled announcement failed for quest %s in guild %s",
                         quest.quest_id,
                         guild.id,
@@ -559,7 +478,7 @@ class QuestCommandsCog(commands.Cog):
                         )
             return True
         except Exception as exc:
-            logging.warning(
+            logger.warning(
                 "Falling back to direct quest persistence for %s in guild %s: %s",
                 quest.quest_id,
                 guild.id,
@@ -600,7 +519,7 @@ class QuestCommandsCog(commands.Cog):
                         )
                         raise ValueError(message)
 
-                    logging.warning(
+                    logger.warning(
                         "Signup API returned %s for quest %s in guild %s: %s",
                         resp.status,
                         quest.quest_id,
@@ -611,7 +530,7 @@ class QuestCommandsCog(commands.Cog):
         except ValueError:
             raise
         except Exception as exc:
-            logging.warning(
+            logger.warning(
                 "Signup API request failed for quest %s in guild %s: %s",
                 quest.quest_id,
                 guild.id,
@@ -644,7 +563,7 @@ class QuestCommandsCog(commands.Cog):
                     if resp.status in (400, 404):
                         raise ValueError(detail or "Unable to accept signup request.")
 
-                    logging.warning(
+                    logger.warning(
                         "Signup select API returned %s for quest %s in guild %s: %s",
                         resp.status,
                         quest.quest_id,
@@ -655,7 +574,7 @@ class QuestCommandsCog(commands.Cog):
         except ValueError:
             raise
         except Exception as exc:
-            logging.warning(
+            logger.warning(
                 "Signup select API request failed for quest %s in guild %s: %s",
                 quest.quest_id,
                 guild.id,
@@ -688,7 +607,7 @@ class QuestCommandsCog(commands.Cog):
                     if resp.status in (400, 404):
                         raise ValueError(detail or "Unable to remove signup.")
 
-                    logging.warning(
+                    logger.warning(
                         "Signup removal API returned %s for quest %s in guild %s: %s",
                         resp.status,
                         quest.quest_id,
@@ -699,7 +618,7 @@ class QuestCommandsCog(commands.Cog):
         except ValueError:
             raise
         except Exception as exc:
-            logging.warning(
+            logger.warning(
                 "Signup removal API request failed for quest %s in guild %s: %s",
                 quest.quest_id,
                 guild.id,
@@ -748,7 +667,7 @@ class QuestCommandsCog(commands.Cog):
                     if resp.status in (400, 404):
                         raise ValueError(detail or "Unable to nudge quest.")
 
-                    logging.warning(
+                    logger.warning(
                         "Nudge API returned %s for quest %s in guild %s: %s",
                         resp.status,
                         quest.quest_id,
@@ -759,7 +678,7 @@ class QuestCommandsCog(commands.Cog):
         except ValueError:
             raise
         except Exception as exc:
-            logging.warning(
+            logger.warning(
                 "Nudge API request failed for quest %s in guild %s: %s",
                 quest.quest_id,
                 guild.id,
@@ -777,7 +696,7 @@ class QuestCommandsCog(commands.Cog):
         try:
             await self._demo_log(self.bot, guild, message)
         except Exception as exc:
-            logging.warning(
+            logger.warning(
                 "Failed to emit nudge log for quest %s in guild %s",
                 quest_title,
                 getattr(guild, "id", "unknown"),
@@ -808,7 +727,7 @@ class QuestCommandsCog(commands.Cog):
                     if resp.status in (400, 404):
                         raise ValueError(detail or "Unable to close signups.")
 
-                    logging.warning(
+                    logger.warning(
                         "Close signups API returned %s for quest %s in guild %s: %s",
                         resp.status,
                         quest.quest_id,
@@ -819,7 +738,7 @@ class QuestCommandsCog(commands.Cog):
         except ValueError:
             raise
         except Exception as exc:
-            logging.warning(
+            logger.warning(
                 "Close signups API request failed for quest %s in guild %s: %s",
                 quest.quest_id,
                 guild.id,
@@ -1146,7 +1065,7 @@ class QuestCommandsCog(commands.Cog):
         quest_title = quest.title or str(quest.quest_id)
         if channel is not None:
             try:
-                embed = self._build_nudge_embed(
+                embed = build_nudge_embed(
                     quest,
                     member,
                     jump_url,
@@ -1232,10 +1151,13 @@ class QuestCommandsCog(commands.Cog):
             last_updated_at=datetime.now(timezone.utc),
         )
 
-        await send_demo_log(
+        await logger.audit(
             self.bot,
             guild,
-            f"{member.mention} requested to join `{quest.title or quest.quest_id}` with `{str(character_id)}`",
+            "%s requested to join `%s` with `%s`",
+            member.mention,
+            quest.title or str(quest.quest_id),
+            str(character_id),
         )
 
         return (
@@ -1288,7 +1210,7 @@ class QuestCommandsCog(commands.Cog):
             try:
                 channel = await guild.fetch_channel(int(quest.channel_id))
             except Exception as exc:  # pragma: no cover - best effort logging
-                logging.debug(
+                logger.debug(
                     "Unable to fetch quest channel %s in guild %s: %s",
                     quest.channel_id,
                     guild.id,
@@ -1301,10 +1223,12 @@ class QuestCommandsCog(commands.Cog):
                 f"{member.mention} withdrew from quest `{quest.title or quest.quest_id}`."
             )
 
-        await send_demo_log(
+        await logger.audit(
             self.bot,
             guild,
-            f"{member.mention} withdrew from quest `{quest.title or quest.quest_id}`",
+            "%s withdrew from quest `%s`",
+            member.mention,
+            quest.title or str(quest.quest_id),
         )
 
         return f"You have been removed from quest `{quest_id}`."
@@ -1317,7 +1241,7 @@ class QuestCommandsCog(commands.Cog):
             message = await channel.fetch_message(int(quest.message_id))
             await message.edit(view=None)
         except Exception as exc:  # pragma: no cover - best effort cleanup
-            logging.debug(
+            logger.debug(
                 "Unable to remove signup view for quest %s in guild %s: %s",
                 quest.quest_id,
                 guild.id,
@@ -1347,17 +1271,18 @@ class QuestCommandsCog(commands.Cog):
                     "Don't forget to submit your quest summary for bonus rewards."
                 )
             except Exception as exc:  # pragma: no cover - DM failures expected
-                logging.debug(
+                logger.debug(
                     "Unable to DM summary reminder to user %s in guild %s: %s",
                     member.id,
                     guild.id,
                     exc,
                 )
 
-        await send_demo_log(
+        await logger.audit(
             self.bot,
             guild,
-            f"Summary reminders sent for quest `{quest.title or quest.quest_id}`",
+            "Summary reminders sent for quest `%s`",
+            quest.title or str(quest.quest_id),
         )
 
     # ---------- Public helpers for quest views (legacy interface) ----------
@@ -1441,6 +1366,75 @@ class QuestCommandsCog(commands.Cog):
     ) -> Optional[discord.Member]:
         return await self._resolve_member_for_user_id(guild, user_id)
 
+    async def _ensure_dm_channel(
+        self, interaction: discord.Interaction, member: discord.Member
+    ) -> Optional[Messageable]:
+        try:
+            return await member.create_dm()
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "I can't send you direct messages. Enable DMs from server members and run `/quest create` again.",
+                ephemeral=True,
+            )
+            return None
+
+    _SESSION_ERROR_HANDLERS: Dict[type[Exception], Callable[[Exception], str]] = {
+        RuntimeError: lambda exc: str(exc),
+        discord.HTTPException: lambda exc: (
+            "Quest creation encountered a Discord error. Please try again later."
+        ),
+    }
+
+    async def _handle_session_error(
+        self, interaction: discord.Interaction, error: Exception
+    ) -> None:
+        for exc_type, formatter in self._SESSION_ERROR_HANDLERS.items():
+            if isinstance(error, exc_type):
+                message = formatter(error)
+                break
+        else:
+            logging.exception("Unexpected quest creation session error: %s", error)
+            message = (
+                "Quest creation encountered an unexpected error. Please try again later."
+            )
+
+        await interaction.followup.send(message, ephemeral=True)
+
+    async def _run_quest_creation_session(
+        self,
+        session: "QuestCreationSession",
+        interaction: discord.Interaction,
+    ) -> Optional[Quest]:
+        try:
+            result = await session.run()
+        except Exception as exc:
+            await self._handle_session_error(interaction, exc)
+            return None
+
+        if not result.success or result.quest is None:
+            await interaction.followup.send(
+                result.error or "Quest creation cancelled.",
+                ephemeral=True,
+            )
+            return None
+
+        return result.quest
+
+    async def _send_creation_summary(
+        self,
+        session: "QuestCreationSession",
+        quest: Quest,
+        dm_message: str,
+    ) -> bool:
+        try:
+            await session.send_completion_summary(quest, dm_message)
+            return True
+        except RuntimeError:
+            return False
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logging.exception("Quest creation summary DM failed: %s", exc)
+            return False
+
     @quest.command(name="create", description="Start a DM wizard to draft a quest.")
     @app_commands.guild_only()
     async def quest_create(self, interaction: discord.Interaction) -> None:
@@ -1480,43 +1474,24 @@ class QuestCommandsCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         self._active_quest_sessions.add(member.id)
         try:
-            try:
-                dm_channel = await member.create_dm()
-            except discord.Forbidden:
-                await interaction.followup.send(
-                    "I can't send you direct messages. Enable DMs from server members and run `/quest create` again.",
-                    ephemeral=True,
-                )
+            dm_channel = await self._ensure_dm_channel(interaction, member)
+            if dm_channel is None:
                 return
 
-            session = QuestCreationSession(self, interaction.guild, member, user, dm_channel)
-            try:
-                result = await session.run()
-            except RuntimeError as exc:
-                await interaction.followup.send(str(exc), ephemeral=True)
+            session = QuestCreationSession(
+                self, interaction.guild, member, user, dm_channel
+            )
+            quest = await self._run_quest_creation_session(session, interaction)
+            if quest is None:
                 return
 
-            if not result.success or result.quest is None:
-                await interaction.followup.send(
-                    result.error or "Quest creation cancelled.",
-                    ephemeral=True,
-                )
-                return
-
-            quest = result.quest
             self._persist_quest(interaction.guild.id, quest)
-            dm_sent = True
             dm_message = (
                 f"Quest `{quest.quest_id}` is saved as a draft.\n"
                 f"Run `/quest announce` in the server with Quest ID `{quest.quest_id}` when you're ready to publish, "
                 "or `/quest edit` to make further changes."
             )
-            try:
-                await session.send_completion_summary(quest, dm_message)
-            except RuntimeError:
-                dm_sent = False
-            except Exception:
-                dm_sent = False
+            dm_sent = await self._send_creation_summary(session, quest, dm_message)
 
             reply = (
                 f"Quest `{quest.quest_id}` drafted. "
@@ -1559,104 +1534,7 @@ class QuestCommandsCog(commands.Cog):
         quest: str,
         time: Optional[str] = None,
     ) -> None:
-        await interaction.response.defer(ephemeral=True)
-
-        if interaction.guild is None:
-            await interaction.followup.send(
-                "This command can only be used inside a guild.", ephemeral=True
-            )
-            return
-
-        member = interaction.user
-        if not isinstance(member, discord.Member):
-            await interaction.followup.send(
-                "Only guild members can manage quests.", ephemeral=True
-            )
-            return
-
-        try:
-            quest_id = QuestID.parse(quest.upper())
-        except ValueError as exc:
-            await interaction.followup.send(str(exc), ephemeral=True)
-            return
-
-        existing = self._fetch_quest(interaction.guild.id, quest_id)
-        if existing is None:
-            await interaction.followup.send("Quest not found.", ephemeral=True)
-            return
-
-        try:
-            user = await self._get_cached_user(member)
-        except RuntimeError as exc:
-            await interaction.followup.send(str(exc), ephemeral=True)
-            return
-
-        if user.user_id != existing.referee_id and not is_allowed_staff(self.bot, member):
-            await interaction.followup.send(
-                "Only the quest referee or allowed staff can announce this quest.",
-                ephemeral=True,
-            )
-            return
-
-        if existing.channel_id and existing.message_id and not time:
-            await interaction.followup.send(
-                "This quest has already been announced.", ephemeral=True
-            )
-            return
-
-        if time:
-            parsed_time = self._parse_datetime_input(time)
-            if parsed_time is None:
-                await interaction.followup.send(
-                    "Could not parse the provided time. Enter epoch seconds (UTC).",
-                    ephemeral=True,
-                )
-                return
-            if parsed_time <= datetime.now(timezone.utc):
-                await interaction.followup.send(
-                    "Scheduled time must be in the future.", ephemeral=True
-                )
-                return
-            existing.announce_at = parsed_time
-            existing.status = QuestStatus.DRAFT
-            self._persist_quest(interaction.guild.id, existing)
-            await interaction.followup.send(
-                f"Quest `{existing.quest_id}` will be announced at <t:{int(parsed_time.timestamp())}:F>.",
-                ephemeral=True,
-            )
-            return
-
-        if existing.channel_id and existing.message_id:
-            await interaction.followup.send(
-                "Quest is already announced. Use `/quest nudge` or `/quest edit` instead.",
-                ephemeral=True,
-            )
-            return
-
-        try:
-            await self._announce_quest_now(
-                interaction.guild,
-                existing,
-                invoker=member,
-                fallback_channel=interaction.channel
-                if isinstance(interaction.channel, discord.TextChannel)
-                else None,
-            )
-        except ValueError as exc:
-            await interaction.followup.send(str(exc), ephemeral=True)
-            return
-        except Exception as exc:  # pragma: no cover - defensive
-            logging.exception("Quest announce failed: %s", exc)
-            await interaction.followup.send(
-                "Unable to announce the quest right now. Please try again shortly.",
-                ephemeral=True,
-            )
-            return
-
-        await interaction.followup.send(
-            f"Quest `{existing.quest_id}` announced in <#{existing.channel_id}>.",
-            ephemeral=True,
-        )
+        await quest_commands.quest_announce(self, interaction, quest, time)
 
     @quest.command(name="nudge", description="Re-announce a quest to bring attention back to it.")
     @app_commands.describe(quest="Quest ID (e.g. QUESA1B2C3)")
@@ -1664,30 +1542,7 @@ class QuestCommandsCog(commands.Cog):
     async def quest_nudge(
         self, interaction: discord.Interaction, quest: str
     ) -> None:
-        await interaction.response.defer(ephemeral=True)
-        if interaction.guild is None:
-            await interaction.followup.send(
-                "This command can only be used inside a guild.", ephemeral=True
-            )
-            return
-
-        try:
-            quest_id = QuestID.parse(quest.upper())
-        except ValueError as exc:
-            await interaction.followup.send(str(exc), ephemeral=True)
-            return
-
-        try:
-            message = await self._execute_nudge(interaction, quest_id)
-        except ValueError as exc:
-            await interaction.followup.send(str(exc), ephemeral=True)
-            return
-        except Exception as exc:  # pragma: no cover - defensive
-            logging.exception("Quest nudge failed: %s", exc)
-            await interaction.followup.send("Unable to nudge the quest right now.", ephemeral=True)
-            return
-
-        await interaction.followup.send(message, ephemeral=True)
+        await quest_commands.quest_nudge(self, interaction, quest)
 
     @quest.command(name="cancel", description="Cancel a quest and remove its signup interface.")
     @app_commands.describe(quest="Quest ID (e.g. QUESA1B2C3)")
@@ -1695,7 +1550,110 @@ class QuestCommandsCog(commands.Cog):
     async def quest_cancel(
         self, interaction: discord.Interaction, quest: str
     ) -> None:
+        await quest_commands.quest_cancel(self, interaction, quest)
+
+    @quest.command(name="players", description="List players and characters who played in a quest.")
+    @app_commands.describe(quest="Quest ID (e.g. QUESA1B2C3)")
+    @app_commands.guild_only()
+    async def quest_players(
+        self, interaction: discord.Interaction, quest: str
+    ) -> None:
+        await quest_commands.quest_players(self, interaction, quest)
+
+    @quest.command(name="edit", description="Update a drafted or announced quest via DM.")
+    @app_commands.describe(quest="Quest ID (e.g. QUESA1B2C3)")
+    @app_commands.guild_only()
+    async def quest_edit(self, interaction: discord.Interaction, quest: str) -> None:
+        await quest_commands.quest_edit(self, interaction, quest)
+
+    @app_commands.command(
+        name="joinquest",
+        description="Join an announced quest with one of your characters.",
+    )
+    @app_commands.autocomplete(
+        quest_id=quest_id_autocomplete, character_id=character_id_autocomplete
+    )
+    @app_commands.describe(
+    quest_id="Quest identifier (e.g. QUESA1B2C3)",
+        character_id="Character identifier (e.g. CHAR0001)",
+    )
+    async def joinquest(
+        self,
+        interaction: discord.Interaction,
+        quest_id: str,
+        character_id: str,
+    ) -> None:
         await interaction.response.defer(ephemeral=True)
+
+        try:
+            quest_id_obj = QuestID.parse(quest_id.upper())
+            char_id_obj = CharacterID.parse(character_id.upper())
+        except ValueError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+
+        try:
+            message = await self._execute_join(interaction, quest_id_obj, char_id_obj)
+        except RuntimeError as exc:
+            logging.exception("Failed to resolve user for quest join: %s", exc)
+            await interaction.followup.send(
+                "Internal error resolving your profile; please try again later.",
+                ephemeral=True,
+            )
+            return
+        except ValueError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+          
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("Quest announce failed: %s", exc)
+            await interaction.followup.send(
+                "Unable to announce the quest right now. Please try again shortly.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.followup.send(message, ephemeral=True)
+
+    @app_commands.command(
+        name="leavequest", description="Withdraw from a quest signup."
+    )
+    @app_commands.autocomplete(quest_id=quest_id_autocomplete)
+    @app_commands.describe(
+    quest_id="Quest identifier (e.g. QUESA1B2C3)",
+    )
+    async def leavequest(
+        self,
+        interaction: discord.Interaction,
+        quest_id: str,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            quest_id_obj = QuestID.parse(quest_id.upper())
+        except ValueError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+
+        try:
+            message = await self._execute_leave(interaction, quest_id_obj)
+        except ValueError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("Quest nudge failed: %s", exc)
+            await interaction.followup.send("Unable to nudge the quest right now.", ephemeral=True)
+            return
+
+        await interaction.followup.send(message, ephemeral=True)
+
+    @app_commands.command(
+        name="startquest", description="Close signups and mark a quest as started."
+    )
+    @app_commands.describe(quest_id="Quest identifier (e.g. QUESA1B2C3)")
+    async def startquest(self, interaction: discord.Interaction, quest_id: str) -> None:
+        await interaction.response.defer(ephemeral=True)
+
         if interaction.guild is None:
             await interaction.followup.send(
                 "This command can only be used inside a guild.", ephemeral=True
@@ -1705,37 +1663,40 @@ class QuestCommandsCog(commands.Cog):
         member = interaction.user
         if not isinstance(member, discord.Member):
             await interaction.followup.send(
-                "Only guild members can manage quests.", ephemeral=True
+                "Only guild members can start quests.", ephemeral=True
             )
             return
 
         try:
-            quest_id = QuestID.parse(quest.upper())
+            quest_id_obj = QuestID.parse(quest_id.upper())
         except ValueError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
             return
 
-        existing = self._fetch_quest(interaction.guild.id, quest_id)
-        if existing is None:
+        quest = self._fetch_quest(interaction.guild.id, quest_id_obj)
+        if quest is None:
             await interaction.followup.send("Quest not found.", ephemeral=True)
             return
 
         try:
-            user = await self._get_cached_user(member)
-        except RuntimeError as exc:
-            await interaction.followup.send(str(exc), ephemeral=True)
-            return
+            referee_user_id = (
+                quest.referee_id
+                if isinstance(quest.referee_id, UserID)
+                else UserID.parse(str(quest.referee_id))
+            )
+        except Exception:
+            referee_user_id = None
 
-        if user.user_id != existing.referee_id and not is_allowed_staff(self.bot, member):
+        invoker_user_id = UserID.from_body(str(member.id))
+
+        if referee_user_id != invoker_user_id:
             await interaction.followup.send(
-                "Only the quest referee or allowed staff can cancel this quest.",
-                ephemeral=True,
+                "Only the quest referee can start the quest.", ephemeral=True
             )
             return
 
-        existing.set_cancelled()
-        existing.announce_at = None
-        self._persist_quest(interaction.guild.id, existing)
+        quest.close_signups()
+        quest.started_at = datetime.now(timezone.utc)
 
         if existing.channel_id and existing.message_id:
             try:
@@ -1747,7 +1708,7 @@ class QuestCommandsCog(commands.Cog):
                     view=None,
                 )
             except Exception:
-                logging.exception(
+                logger.exception(
                     "Failed to update cancelled quest %s in guild %s",
                     existing.quest_id,
                     interaction.guild.id,
@@ -2008,7 +1969,7 @@ class QuestCommandsCog(commands.Cog):
         try:
             message = await self._execute_join(interaction, quest_id_obj, char_id_obj)
         except RuntimeError as exc:
-            logging.exception("Failed to resolve user for quest join: %s", exc)
+            logger.exception("Failed to resolve user for quest join: %s", exc)
             await interaction.followup.send(
                 "Internal error resolving your profile; please try again later.",
                 ephemeral=True,
@@ -2107,7 +2068,7 @@ class QuestCommandsCog(commands.Cog):
             last_updated_at=quest.started_at,
             view=None,
         )
-        logging.info(
+        logger.info(
             "Quest %s started by %s in guild %s",
             quest_id_obj,
             member.id,
@@ -2122,10 +2083,12 @@ class QuestCommandsCog(commands.Cog):
                 f"Quest `{quest.title or quest.quest_id}` has started! Signups are now closed."
             )
 
-        await send_demo_log(
+        await logger.audit(
             self.bot,
             interaction.guild,
-            f"Quest `{quest.title or quest.quest_id}` started by {member.mention}",
+            "Quest `%s` started by %s",
+            quest.title or str(quest.quest_id),
+            member.mention,
         )
 
         await interaction.followup.send(
@@ -2192,7 +2155,7 @@ class QuestCommandsCog(commands.Cog):
             last_updated_at=quest.ended_at,
             view=None,
         )
-        logging.info(
+        logger.info(
             "Quest %s ended by %s in guild %s",
             quest_id_obj,
             member.id,
@@ -2207,10 +2170,12 @@ class QuestCommandsCog(commands.Cog):
                 f"Quest `{quest.title or quest.quest_id}` has been marked as completed. Please submit your summaries!"
             )
 
-        await send_demo_log(
+        await logger.audit(
             self.bot,
             interaction.guild,
-            f"Quest `{quest.title or quest.quest_id}` completed by {member.mention}",
+            "Quest `%s` completed by %s",
+            quest.title or str(quest.quest_id),
+            member.mention,
         )
 
         await self._send_summary_reminders(interaction.guild, quest)
@@ -2706,7 +2671,7 @@ class QuestAnnounceView(discord.ui.View):
             await interaction.followup.send(str(exc))
             return
         except Exception as exc:  # pragma: no cover - defensive
-            logging.exception("Quest announce via DM failed: %s", exc)
+            logger.exception("Quest announce via DM failed: %s", exc)
             await interaction.followup.send("Unable to announce the quest right now.")
             return
 

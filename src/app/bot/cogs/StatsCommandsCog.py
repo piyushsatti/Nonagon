@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import logging
+from app.bot.utils.logging import get_logger
 from datetime import timezone
 from typing import Optional
 
@@ -9,6 +9,9 @@ from discord import app_commands
 from discord.ext import commands
 
 from app.domain.models.UserModel import User
+
+
+logger = get_logger(__name__)
 
 
 class StatsCommandsCog(commands.Cog):
@@ -65,7 +68,7 @@ class StatsCommandsCog(commands.Cog):
         try:
             user = await self._get_cached_user(member)
         except RuntimeError as exc:
-            logging.exception("Failed to resolve user for stats: %s", exc)
+            logger.exception("Failed to resolve user for stats: %s", exc)
             await interaction.response.send_message(
                 "Internal error resolving your profile; please try again later.",
                 ephemeral=True,
@@ -199,7 +202,7 @@ class StatsCommandsCog(commands.Cog):
         try:
             user = await self._get_cached_user(member)
         except RuntimeError as exc:
-            logging.exception("Failed to resolve user for nudges: %s", exc)
+            logger.exception("Failed to resolve user for nudges: %s", exc)
             await interaction.response.send_message(
                 "Internal error resolving your profile; please try again later.",
                 ephemeral=True,

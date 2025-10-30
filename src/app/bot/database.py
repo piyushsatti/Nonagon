@@ -1,9 +1,12 @@
-import logging
 import os
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 
+from app.bot.utils.logging import get_logger
 from .config import MONGO_URI
+
+
+logger = get_logger(__name__)
 
 
 def _make_client() -> MongoClient:
@@ -23,9 +26,9 @@ db_client = _make_client()
 
 try:
     db_client.admin.command('ping')
-    logging.info("Pinged MongoDB. Connection OK.")
-except Exception as e:
-    logging.error("MongoDB ping failed: %s", e)
+    logger.info("Pinged MongoDB. Connection OK.")
+except Exception as exc:
+    logger.error("MongoDB ping failed: %s", exc)
 
 
 def create_db(db_name: str):
