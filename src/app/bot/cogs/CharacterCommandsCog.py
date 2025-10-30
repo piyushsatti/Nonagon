@@ -6,15 +6,12 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional
+from urllib.parse import urlparse
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from app.bot.character import (
-    CharacterConfirmView,
-    CharacterLinkView,
-    CharacterCreationSession,
-    CharacterUpdateSession,
     build_character_embed,
     build_character_embed_from_model,
     status_label,
@@ -1682,15 +1679,15 @@ class CharacterUpdateSession(CharacterSessionBase):
         name = self.data.get("name")
         if name is not None:
             character.name = name
-        for field in (
+        for attr in (
             "ddb_link",
             "character_thread_link",
             "token_link",
             "art_link",
         ):
-            value = self.data.get(field)
+            value = self.data.get(attr)
             if value is not None:
-                setattr(character, field, value or "")
+                setattr(character, attr, value or "")
 
         description = self._normalize_optional(self.data.get("description"))
         notes = self._normalize_optional(self.data.get("notes"))

@@ -358,7 +358,7 @@ class CharacterCreationSession(CharacterSessionBase):
 
         try:
             user = await self.cog._get_cached_user(self.member)
-        except RuntimeError as exc:
+        except RuntimeError:
             await self._safe_send(
                 "Internal error resolving your profile; please try again later."
             )

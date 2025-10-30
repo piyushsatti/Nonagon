@@ -175,9 +175,6 @@ class Nonagon(commands.Bot):
             if not to_flush:
                 continue
 
-            # Limit concurrency to avoid thread pool contention
-            semaphore = asyncio.Semaphore(10)  # adjust limit as needed
-
             async def flush_user(gid, uid, user):
                 guild_entry = self.guild_data.get(gid)
                 if guild_entry is None:

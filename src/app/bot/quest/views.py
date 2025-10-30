@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, List, Optional
 import discord
 
 from app.bot.ui.wizards import send_ephemeral_message
-from app.bot.utils.log_stream import send_demo_log
 from app.domain.models.EntityIDModel import CharacterID, QuestID, UserID
 from app.domain.models.QuestModel import PlayerSignUp, PlayerStatus, Quest
+from app.bot.utils.logging import get_logger
 
 if TYPE_CHECKING:
     from app.bot.cogs.QuestCommandsCog import QuestCommandsCog
@@ -106,19 +106,21 @@ class QuestSignupView(discord.ui.View):
     ) -> None:
         try:
             quest_id = self._resolve_quest_id(interaction)
+            if interaction.guild is None or not isinstance(
+                interaction.user, discord.Member
+            ):
+                await send_ephemeral_message(
+                    interaction,
+                    "I can only look up characters inside a guild. Please run this from a server channel.",
+                )
+                return
+            member = interaction.user
         except ValueError:
             await send_ephemeral_message(
                 interaction,
                 "I couldn't determine which quest this is. Please refresh the announcement and try again.",
             )
             return
-        if interaction.guild is None or not isinstance(
-            interaction.user, discord.Member
-        ):
-            await send_ephemeral_message(
-                interaction,
-                "I can only look up characters inside a guild. Please run this from a server channel.",
-            )
         except QuestSignupView._ValidationError as exc:
             await self._send_validation_error(interaction, str(exc))
             return
@@ -147,6 +149,15 @@ class QuestSignupView(discord.ui.View):
         try:
             quest_id_raw = self._resolve_quest_id(interaction)
             quest_id = QuestID.parse(quest_id_raw)
+            if interaction.guild is None or not isinstance(
+                interaction.user, discord.Member
+            ):
+                await send_ephemeral_message(
+                    interaction,
+                    "I can only review requests inside a guild. Please open this from the server announcement.",
+                )
+                return
+            member = interaction.user
         except ValueError:
             await send_ephemeral_message(
                 interaction,
@@ -154,13 +165,6 @@ class QuestSignupView(discord.ui.View):
             )
             return
 
-        if interaction.guild is None or not isinstance(
-            interaction.user, discord.Member
-        ):
-            await send_ephemeral_message(
-                interaction,
-                "I can only review requests inside a guild. Please open this from the server announcement.",
-            )
         except QuestSignupView._ValidationError as exc:
             await self._send_validation_error(interaction, str(exc))
             return

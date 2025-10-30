@@ -615,7 +615,7 @@ class QuestAnnounceView(discord.ui.View):
         except ValueError as exc:
             await interaction.followup.send(str(exc))
             return
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception:  # pragma: no cover - defensive
             await interaction.followup.send("Unable to announce the quest right now.")
             raise
 

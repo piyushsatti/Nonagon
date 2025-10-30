@@ -118,4 +118,3 @@ def _format_message(
 
 
 __all__ = ["BotLogger", "DEFAULT_FORMAT", "get_logger"]
-
