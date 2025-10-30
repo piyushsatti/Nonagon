@@ -16,3 +16,21 @@ DEFAULT_EXTENSIONS: tuple[str, ...] = (
 
 
 __all__ = ["DEFAULT_EXTENSIONS"]
+
+# Short alias map for interactive commands (short -> full module path)
+# Keep this list authoritative and deterministic for the extension manager.
+ALIASES: dict[str, str] = {
+    "extension_manager": "app.bot.cogs.admin.extension_manager",
+    "permissions": "app.bot.cogs.admin.permissions",
+    "listeners": "app.bot.cogs.listeners.guild_listeners",
+    "character": "app.bot.cogs.character.cog",
+    "guild": "app.bot.cogs.guild.cog",
+    "help": "app.bot.cogs.help.cog",
+    "lookup": "app.bot.cogs.lookup.cog",
+    "setup": "app.bot.cogs.setup.cog",
+    "stats": "app.bot.cogs.stats.cog",
+    "summary": "app.bot.cogs.summary.cog",
+    "quests": "app.bot.cogs.quests.cog",
+}
+
+__all__.extend(["ALIASES"])

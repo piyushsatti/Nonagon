@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import importlib
-from typing import Iterable
+from typing import Iterable, List
 
 import discord
 import inspect
@@ -10,10 +10,43 @@ from discord.ext import commands
 
 from app.bot.utils.logging import get_logger
 from app.bot.utils.sync import sync_guilds
+from app.bot.cogs.manifest import ALIASES
+from typing import Union
 
 
-def _iter_extensions(bot: commands.Bot) -> Iterable[str]:
-    return sorted(bot.extensions.keys())
+def _iter_extensions(bot: Union[commands.Bot, discord.Client]) -> Iterable[str]:
+    # bot.extensions exists on both Bot and Client runtime instances
+    return sorted(getattr(bot, "extensions", {}).keys())
+
+
+async def extension_autocomplete(
+    interaction: discord.Interaction, current: str
+) -> List[app_commands.Choice[str]]:
+    """Autocomplete available extensions. Returns choices showing a short name -> full path.
+
+    Supports selecting either the short alias (e.g. `guild`) or the full path.
+    """
+    try:
+        exts = list(_iter_extensions(interaction.client))
+    except Exception:
+        exts = []
+
+    choices: List[app_commands.Choice[str]] = []
+    seen_values = set()
+    for ext in exts:
+        parts = ext.split(".")
+        short = parts[-2] if len(parts) >= 2 and parts[-1] == "cog" else parts[-1]
+        # label shows short and full; value is the short alias (we no longer accept full paths)
+        label = f"{short} → {ext}"
+        if label.lower().find(current.lower()) != -1 or short.lower().find(current.lower()) != -1:
+            if ext not in seen_values:
+                # prefer offering the short alias as the selectable value
+                choices.append(app_commands.Choice(name=label, value=short))
+                seen_values.add(short)
+        if len(choices) >= 25:
+            break
+
+    return choices
 
 
 logger = get_logger(__name__)
@@ -37,18 +70,38 @@ class ExtensionManagerCog(commands.Cog):
         self.bot = bot
         super().__init__()
 
+    def _resolve_extension(self, name: str) -> str:
+        """Resolve a short alias to a full extension path.
+
+        If `name` contains a dot it's treated as a path and returned unchanged.
+        Otherwise we try to match the short name (last meaningful segment) to an available extension.
+        """
+        # Deterministic resolution via ALIASES manifest only (no backward full-path compatibility)
+        resolved = ALIASES.get(name)
+        if resolved:
+            return resolved
+        # if not mapped, raise ValueError to let the caller know quickly
+        raise ValueError(f"Unknown extension alias: {name}")
+
     @app_commands.command(name="load", description="Load a bot extension module.")
     @app_commands.check(_owner_check)
+    @app_commands.autocomplete(extension=extension_autocomplete)
     async def load_extension(
         self, interaction: discord.Interaction, extension: str
     ) -> None:
         await interaction.response.defer(ephemeral=True)
         try:
-            await self.bot.load_extension(extension)
+            ext_to_load = self._resolve_extension(extension)
+        except ValueError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+
+        try:
+            await self.bot.load_extension(ext_to_load)
         except Exception as exc:
-            logger.exception("Failed to load extension %s", extension)
+            logger.exception("Failed to load extension %s", ext_to_load)
             await interaction.followup.send(
-                f"Unable to load `{extension}`: {exc}", ephemeral=True
+                f"Unable to load `{ext_to_load}`: {exc}", ephemeral=True
             )
             return
 
@@ -62,25 +115,32 @@ class ExtensionManagerCog(commands.Cog):
                 interaction.client,
                 interaction.guild,
                 "Extension `%s` loaded by %s",
-                extension,
+                ext_to_load,
                 actor_display,
             )
         await interaction.followup.send(
-            f"Loaded extension `{extension}`", ephemeral=True
+            f"Loaded extension `{ext_to_load}`", ephemeral=True
         )
 
     @app_commands.command(name="unload", description="Unload a bot extension module.")
     @app_commands.check(_owner_check)
+    @app_commands.autocomplete(extension=extension_autocomplete)
     async def unload_extension(
         self, interaction: discord.Interaction, extension: str
     ) -> None:
         await interaction.response.defer(ephemeral=True)
         try:
-            await self.bot.unload_extension(extension)
+            ext_to_unload = self._resolve_extension(extension)
+        except ValueError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+
+        try:
+            await self.bot.unload_extension(ext_to_unload)
         except Exception as exc:
-            logger.exception("Failed to unload extension %s", extension)
+            logger.exception("Failed to unload extension %s", ext_to_unload)
             await interaction.followup.send(
-                f"Unable to unload `{extension}`: {exc}", ephemeral=True
+                f"Unable to unload `{ext_to_unload}`: {exc}", ephemeral=True
             )
             return
 
@@ -94,26 +154,33 @@ class ExtensionManagerCog(commands.Cog):
                 interaction.client,
                 interaction.guild,
                 "Extension `%s` unloaded by %s",
-                extension,
+                ext_to_unload,
                 actor_display,
             )
         await interaction.followup.send(
-            f"Unloaded extension `{extension}`", ephemeral=True
+            f"Unloaded extension `{ext_to_unload}`", ephemeral=True
         )
 
     @app_commands.command(name="reload", description="Reload a bot extension module.")
     @app_commands.check(_owner_check)
+    @app_commands.autocomplete(extension=extension_autocomplete)
     async def reload_extension(
         self, interaction: discord.Interaction, extension: str
     ) -> None:
         await interaction.response.defer(ephemeral=True)
         try:
-            importlib.reload(importlib.import_module(extension))
-            await self.bot.reload_extension(extension)
+            ext_to_reload = self._resolve_extension(extension)
+        except ValueError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+
+        try:
+            importlib.reload(importlib.import_module(ext_to_reload))
+            await self.bot.reload_extension(ext_to_reload)
         except Exception as exc:
-            logger.exception("Failed to reload extension %s", extension)
+            logger.exception("Failed to reload extension %s", ext_to_reload)
             await interaction.followup.send(
-                f"Unable to reload `{extension}`: {exc}", ephemeral=True
+                f"Unable to reload `{ext_to_reload}`: {exc}", ephemeral=True
             )
             return
 
@@ -127,12 +194,27 @@ class ExtensionManagerCog(commands.Cog):
                 interaction.client,
                 interaction.guild,
                 "Extension `%s` reloaded by %s",
-                extension,
+                ext_to_reload,
                 actor_display,
             )
         await interaction.followup.send(
-            f"Reloaded extension `{extension}`", ephemeral=True
+            f"Reloaded extension `{ext_to_reload}`", ephemeral=True
         )
+
+    @commands.command(name="aliases")
+    @commands.is_owner()
+    async def aliases(self, ctx: commands.Context) -> None:
+        """Owner-only prefix command: DM the owner the alias -> module mapping."""
+        lines = [f"{alias}: {module}" for alias, module in ALIASES.items()]
+        content = "\n".join(lines)
+        try:
+            # send full mapping via DM
+            await ctx.author.send(f"Alias mapping (short -> full module):\n```\n{content}\n```")
+            # brief channel confirmation
+            await ctx.send("Sent you a DM with the current aliases.", delete_after=10)
+        except Exception:
+            # fallback to posting in-channel if DM fails
+            await ctx.send(f"Alias mapping:\n```\n{content}\n```")
 
     @app_commands.command(name="extensions", description="List loaded extensions.")
     @app_commands.check(_owner_check)
