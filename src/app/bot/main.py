@@ -349,8 +349,8 @@ if __name__ == "__main__":
         )
         logger.warning("Unable to create log directory %s: %s", log_dir, exc)
     else:
-        # File handler (append so logs survive restarts) + stream handler
-        file_handler = logging.FileHandler(log_dir / "bot.log", mode="a", encoding="utf-8")
+        # File handler (overwrite each start) + stream handler
+        file_handler = logging.FileHandler(log_dir / "bot.log", mode="w", encoding="utf-8")
         file_handler.setLevel(logging.INFO)
         file_handler.setFormatter(
             logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
