@@ -6,7 +6,8 @@ from typing import TYPE_CHECKING, List, Optional
 
 import discord
 
-from app.bot.utils.logging import get_logger
+from app.bot.ui.wizards import send_ephemeral_message
+from app.bot.utils.log_stream import send_demo_log
 from app.domain.models.EntityIDModel import CharacterID, QuestID, UserID
 from app.domain.models.QuestModel import PlayerSignUp, PlayerStatus, Quest
 
@@ -104,9 +105,19 @@ class QuestSignupView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         try:
-            quest_id = self._require_quest_id_str(interaction)
-            member = self._require_guild_member(
-                interaction, "Unable to resolve characters outside a guild."
+            quest_id = self._resolve_quest_id(interaction)
+        except ValueError:
+            await send_ephemeral_message(
+                interaction,
+                "I couldn't determine which quest this is. Please refresh the announcement and try again.",
+            )
+            return
+        if interaction.guild is None or not isinstance(
+            interaction.user, discord.Member
+        ):
+            await send_ephemeral_message(
+                interaction,
+                "I can only look up characters inside a guild. Please run this from a server channel.",
             )
         except QuestSignupView._ValidationError as exc:
             await self._send_validation_error(interaction, str(exc))
@@ -134,9 +145,21 @@ class QuestSignupView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         try:
-            quest_id = self._require_parsed_quest_id(interaction)
-            member = self._require_guild_member(
-                interaction, "Unable to review requests outside a guild."
+            quest_id_raw = self._resolve_quest_id(interaction)
+            quest_id = QuestID.parse(quest_id_raw)
+        except ValueError:
+            await send_ephemeral_message(
+                interaction,
+                "I couldn't determine which quest this is. Please refresh the announcement and try again.",
+            )
+            return
+
+        if interaction.guild is None or not isinstance(
+            interaction.user, discord.Member
+        ):
+            await send_ephemeral_message(
+                interaction,
+                "I can only review requests inside a guild. Please open this from the server announcement.",
             )
         except QuestSignupView._ValidationError as exc:
             await self._send_validation_error(interaction, str(exc))
@@ -145,31 +168,32 @@ class QuestSignupView(discord.ui.View):
         try:
             reviewer = await self.service.get_cached_user(member)
         except Exception:
-            await interaction.response.send_message(
-                "Unable to resolve your profile; please try again shortly.",
-                ephemeral=True,
+            await send_ephemeral_message(
+                interaction,
+                "I couldn't resolve your profile just now; please try again shortly.",
             )
             return
 
         if not reviewer.is_referee:
-            await interaction.response.send_message(
-                "Only referees can review quest requests.", ephemeral=True
+            await send_ephemeral_message(
+                interaction,
+                "Only referees can review quest requests. If you should have access, ask a staff member to confirm your role.",
             )
             return
 
         quest = self.service.fetch_quest(member.guild.id, quest_id)
         if quest is None:
-            await interaction.response.send_message(
-                "Quest not found; please refresh the announcement.",
-                ephemeral=True,
+            await send_ephemeral_message(
+                interaction,
+                "I couldn't find that quest. Please refresh the announcement and try again.",
             )
             return
 
         pending = [s for s in quest.signups if s.status is not PlayerStatus.SELECTED]
         if not pending and not quest.is_signup_open:
-            await interaction.response.send_message(
-                "No pending requests and signups are already closed.",
-                ephemeral=True,
+            await send_ephemeral_message(
+                interaction,
+                "There are no pending requests, and signups are already closed.",
             )
             return
 
@@ -196,16 +220,20 @@ class QuestSignupView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         try:
-            quest_id = self._require_parsed_quest_id(interaction)
-        except QuestSignupView._ValidationError as exc:
-            await self._send_validation_error(interaction, str(exc))
+            quest_id_raw = self._resolve_quest_id(interaction)
+            quest_id = QuestID.parse(quest_id_raw)
+        except ValueError:
+            await send_ephemeral_message(
+                interaction,
+                "I couldn't determine which quest this is. Please refresh the announcement and try again.",
+            )
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             message = await self.service.execute_nudge(interaction, quest_id)
         except ValueError as exc:
-            await interaction.followup.send(str(exc), ephemeral=True)
+            await interaction.followup.send(f"{exc} Please try again.", ephemeral=True)
             return
 
         await interaction.followup.send(message, ephemeral=True)
@@ -219,16 +247,20 @@ class QuestSignupView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         try:
-            quest_id_obj = self._require_parsed_quest_id(interaction)
-        except QuestSignupView._ValidationError as exc:
-            await self._send_validation_error(interaction, str(exc))
+            quest_id = self._resolve_quest_id(interaction)
+            quest_id_obj = QuestID.parse(quest_id)
+        except ValueError:
+            await send_ephemeral_message(
+                interaction,
+                "I couldn't determine which quest this is. Please refresh the announcement and try again.",
+            )
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             message = await self.service.execute_leave(interaction, quest_id_obj)
         except ValueError as exc:
-            await interaction.followup.send(str(exc), ephemeral=True)
+            await interaction.followup.send(f"{exc} Please try again.", ephemeral=True)
             return
         await interaction.followup.send(message, ephemeral=True)
 
@@ -288,7 +320,10 @@ class CharacterSelect(discord.ui.Select):
                 interaction, quest_id_obj, char_id_obj
             )
         except Exception as exc:
-            await interaction.response.send_message(str(exc), ephemeral=True)
+            await send_ephemeral_message(
+                interaction,
+                f"{exc} Please try again.",
+            )
             return
 
         await interaction.response.send_message(message, ephemeral=True)
@@ -402,8 +437,9 @@ class SignupDecisionView(discord.ui.View):
     async def handle_accept(self, interaction: discord.Interaction) -> None:
         signup = self.pending_map.get(self.selected_user_id or "")
         if signup is None:
-            await interaction.response.send_message(
-                "Select a request to accept first.", ephemeral=True
+            await send_ephemeral_message(
+                interaction,
+                "Select a request to accept first.",
             )
             return
 
@@ -414,14 +450,18 @@ class SignupDecisionView(discord.ui.View):
                 self.guild, self.quest, signup.user_id
             )
         except ValueError as exc:
-            await interaction.followup.send(str(exc), ephemeral=True)
+            await interaction.followup.send(
+                f"{exc} Please try again.", ephemeral=True
+            )
             return
 
         if not via_api:
             try:
                 self.quest.select_signup(signup.user_id)
             except ValueError as exc:
-                await interaction.followup.send(str(exc), ephemeral=True)
+                await interaction.followup.send(
+                    f"{exc} Please try again.", ephemeral=True
+                )
                 return
             self.service.persist_quest(self.guild.id, self.quest)
         else:
@@ -459,8 +499,9 @@ class SignupDecisionView(discord.ui.View):
     async def handle_decline(self, interaction: discord.Interaction) -> None:
         signup = self.pending_map.get(self.selected_user_id or "")
         if signup is None:
-            await interaction.response.send_message(
-                "Select a request to decline first.", ephemeral=True
+            await send_ephemeral_message(
+                interaction,
+                "Select a request to decline first.",
             )
             return
 
@@ -471,14 +512,18 @@ class SignupDecisionView(discord.ui.View):
                 self.guild, self.quest, signup.user_id
             )
         except ValueError as exc:
-            await interaction.followup.send(str(exc), ephemeral=True)
+            await interaction.followup.send(
+                f"{exc} Please try again.", ephemeral=True
+            )
             return
 
         if not via_api:
             try:
                 self.quest.remove_signup(signup.user_id)
             except ValueError as exc:
-                await interaction.followup.send(str(exc), ephemeral=True)
+                await interaction.followup.send(
+                    f"{exc} Please try again.", ephemeral=True
+                )
                 return
             self.service.persist_quest(self.guild.id, self.quest)
         else:
@@ -515,8 +560,9 @@ class SignupDecisionView(discord.ui.View):
 
     async def handle_close(self, interaction: discord.Interaction) -> None:
         if not self.quest.is_signup_open:
-            await interaction.response.send_message(
-                "Signups are already closed for this quest.", ephemeral=True
+            await send_ephemeral_message(
+                interaction,
+                "Signups are already closed for this quest.",
             )
             return
 
@@ -525,14 +571,18 @@ class SignupDecisionView(discord.ui.View):
         try:
             via_api = await self.service.close_signups_via_api(self.guild, self.quest)
         except ValueError as exc:
-            await interaction.followup.send(str(exc), ephemeral=True)
+            await interaction.followup.send(
+                f"{exc} Please try again.", ephemeral=True
+            )
             return
 
         if not via_api:
             try:
                 self.quest.close_signups()
             except ValueError as exc:
-                await interaction.followup.send(str(exc), ephemeral=True)
+                await interaction.followup.send(
+                    f"{exc} Please try again.", ephemeral=True
+                )
                 return
             self.service.persist_quest(self.guild.id, self.quest)
         else:
@@ -661,15 +711,17 @@ class SignupPendingSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if self.disabled:
-            await interaction.response.send_message(
-                "No pending requests to review.", ephemeral=True
+            await send_ephemeral_message(
+                interaction,
+                "There are no pending requests to review.",
             )
             return
 
         value = self.values[0]
         if value == "NONE":
-            await interaction.response.send_message(
-                "No pending requests to review.", ephemeral=True
+            await send_ephemeral_message(
+                interaction,
+                "There are no pending requests to review.",
             )
             return
 
