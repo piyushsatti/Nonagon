@@ -1,4 +1,4 @@
-import logging
+from app.bot.utils.logging import get_logger
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -8,6 +8,9 @@ from discord.ext import commands
 from ..database import db_client
 from ...domain.models.UserModel import User
 from ..services.user_registry import UserRegistry
+
+
+logger = get_logger(__name__)
 
 class ListnerCog(commands.Cog):
 
@@ -55,7 +58,7 @@ class ListnerCog(commands.Cog):
             try:
                 member = await guild.fetch_member(user_id)
             except Exception as exc:  # pragma: no cover - network edge
-                logging.warning(
+                logger.warning(
                     "Unable to resolve guild member %s in %s: %s",
                     user_id,
                     guild.id,
@@ -76,7 +79,7 @@ class ListnerCog(commands.Cog):
             try:
                 channel = await guild.fetch_channel(channel_id)
             except Exception as exc:  # pragma: no cover
-                logging.warning(
+                logger.warning(
                     "Unable to resolve channel %s in guild %s: %s",
                     channel_id,
                     guild.id,
@@ -87,7 +90,7 @@ class ListnerCog(commands.Cog):
         try:
             message = await channel.fetch_message(message_id)
         except Exception as exc:  # pragma: no cover
-            logging.warning(
+            logger.warning(
                 "Unable to fetch message %s in channel %s guild %s: %s",
                 message_id,
                 channel_id,
@@ -116,7 +119,7 @@ class ListnerCog(commands.Cog):
             )
         guild_entry.setdefault("users", {})[member.id] = user
         await self.bot.dirty_data.put((member.guild.id, member.id))
-        logging.info(
+        logger.info(
             "User %s joined guild %s at %s (cached users=%d)",
             member.id,
             member.guild.id,
@@ -131,7 +134,7 @@ class ListnerCog(commands.Cog):
             return
 
         if message.guild is None:
-            logging.debug("Skipping DM message from %s (no guild context)", message.author.id)
+            logger.debug("Skipping DM message from %s (no guild context)", message.author.id)
             return
 
         guild_id = message.guild.id
@@ -144,7 +147,7 @@ class ListnerCog(commands.Cog):
         user.update_last_active(timestamp)
 
         await self.bot.dirty_data.put((guild_id, author_id))
-        logging.info(
+        logger.info(
             "Processed message gid=%s uid=%s channel=%s total_messages=%d last_active=%s",
             guild_id,
             author_id,
@@ -163,7 +166,7 @@ class ListnerCog(commands.Cog):
             return
 
         if reaction.guild_id is None:
-            logging.info(f"No guild ID in reaction: {reaction}")
+            logger.info("No guild ID in reaction: %s", reaction)
             return
 
         guild_id = reaction.guild_id
@@ -171,7 +174,7 @@ class ListnerCog(commands.Cog):
 
         guild = self.bot.get_guild(guild_id)
         if guild is None:
-            logging.warning("Guild %s not found for reaction event", guild_id)
+            logger.warning("Guild %s not found for reaction event", guild_id)
             return
 
         reacting_member = reaction.member
@@ -181,7 +184,7 @@ class ListnerCog(commands.Cog):
                 try:
                     member_obj = await guild.fetch_member(reacting_user_id)
                 except Exception as exc:  # pragma: no cover - network edge
-                    logging.warning(
+                    logger.warning(
                         "Unable to resolve reacting member %s in guild %s: %s",
                         reacting_user_id,
                         guild_id,
@@ -208,7 +211,7 @@ class ListnerCog(commands.Cog):
 
         await self.bot.dirty_data.put((guild_id, reacting_user_id))
         await self.bot.dirty_data.put((guild_id, author_id))
-        logging.info(
+        logger.info(
             "Processed reaction %s gid=%s reactor=%s author=%s (given=%d received=%d)",
             reaction.emoji,
             guild_id,
@@ -253,7 +256,7 @@ class ListnerCog(commands.Cog):
             self._voice_sessions[member.id] = now
 
         else:
-            logging.warning(
+            logger.warning(
                 "Unexpected voice update for %s (before=%s, after=%s)",
                 member.id,
                 before.channel,
@@ -262,7 +265,7 @@ class ListnerCog(commands.Cog):
             return
 
         await self.bot.dirty_data.put((member.guild.id, member.id))
-        logging.info(
+        logger.info(
             "Voice state update gid=%s uid=%s before=%s after=%s total_hours=%.2f",
             member.guild.id,
             member.id,
@@ -278,7 +281,7 @@ class ListnerCog(commands.Cog):
         - Create database for new guild
         - Save all data to cache"""
 
-        logging.info(f"Joined new guild: {guild.name} (ID: {guild.id})")
+        logger.info("Joined new guild: %s (ID: %s)", guild.name, guild.id)
 
         users = {}
         for member in guild.members:
@@ -286,7 +289,7 @@ class ListnerCog(commands.Cog):
             if member.bot:
                 continue
 
-            logging.info("Caching user for guild join %s (ID: %s)", member.name, member.id)
+            logger.info("Caching user for guild join %s (ID: %s)", member.name, member.id)
             user = await self._user_registry.ensure_member(member)
             users[member.id] = user
 
@@ -300,17 +303,19 @@ class ListnerCog(commands.Cog):
             "db": g_db,
             "users": users
         }
-        logging.info(f"Cache created for guild {guild.name}.")
+        logger.info("Cache created for guild %s.", guild.name)
 
     @commands.Cog.listener("on_guild_remove")
     async def _on_guild_remove(self, guild: Guild):
-        logging.info(f"Left guild: {guild.name} (ID: {guild.id}) \nRemoving cache...")
+        logger.info(
+            "Left guild: %s (ID: %s) \nRemoving cache...", guild.name, guild.id
+        )
         self.bot.guild_data.pop(guild.id, None)
-        logging.info(f"Removed caches for guild {guild.name}.")
+        logger.info("Removed caches for guild %s.", guild.name)
 
     @commands.Cog.listener("on_error")
     async def _on_error(self, event_method, /, *args, **kwargs):
-        logging.error(f"Error in {event_method}: {args} {kwargs}")
+        logger.error("Error in %s: %s %s", event_method, args, kwargs)
         await super().on_error(event_method, *args, **kwargs)
 
 async def setup(bot: commands.Bot):

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import re
 import asyncio
 from dataclasses import dataclass
@@ -12,12 +11,15 @@ from discord import app_commands
 from discord.ext import commands
 
 from app.bot.services import guild_settings_store
-from app.bot.utils.log_stream import send_demo_log
+from app.bot.utils.logging import get_logger
 from app.domain.models.EntityIDModel import CharacterID, QuestID, SummaryID, UserID
 from app.domain.models.SummaryModel import QuestSummary, SummaryKind, SummaryStatus
 from app.domain.models.UserModel import User
 from app.infra.mongo.users_repo import UsersRepoMongo
 from app.infra.serialization import to_bson
+
+
+logger = get_logger(__name__)
 
 
 class SummaryCommandsCog(commands.Cog):
@@ -31,7 +33,7 @@ class SummaryCommandsCog(commands.Cog):
         self.bot = bot
         self._users_repo = UsersRepoMongo()
         self._active_summary_sessions: Set[int] = set()
-        self._demo_log = send_demo_log
+        self._demo_log = logger.audit
 
     # ---------- Core helpers ----------
 
@@ -251,7 +253,7 @@ class SummaryCommandsCog(commands.Cog):
             try:
                 channel = await guild.fetch_channel(int(summary.channel_id))
             except Exception as exc:  # pragma: no cover - defensive
-                logging.debug(
+                logger.debug(
                     "Unable to resolve summary channel %s in guild %s: %s",
                     summary.channel_id,
                     guild.id,
@@ -262,7 +264,7 @@ class SummaryCommandsCog(commands.Cog):
         try:
             message = await channel.fetch_message(int(summary.message_id))
         except Exception as exc:  # pragma: no cover - defensive
-            logging.debug(
+            logger.debug(
                 "Unable to fetch summary message %s in guild %s: %s",
                 summary.message_id,
                 guild.id,
@@ -275,7 +277,7 @@ class SummaryCommandsCog(commands.Cog):
         try:
             await message.edit(embed=embed)
         except Exception as exc:  # pragma: no cover - defensive
-            logging.debug(
+            logger.debug(
                 "Unable to update summary announcement %s in guild %s: %s",
                 summary.summary_id,
                 guild.id,
@@ -483,7 +485,7 @@ class SummaryCommandsCog(commands.Cog):
                 await interaction.followup.send(str(exc), ephemeral=True)
                 return
             except Exception as exc:  # pragma: no cover - defensive
-                logging.exception("Summary announce failed: %s", exc)
+                logger.exception("Summary announce failed: %s", exc)
                 await interaction.followup.send(
                     "Unable to post the summary right now. Please try again shortly.",
                     ephemeral=True,
