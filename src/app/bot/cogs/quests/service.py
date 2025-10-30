@@ -5,18 +5,18 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, List, Optional
 
 import discord
-from app.bot.cogs._staff_utils import is_allowed_staff
+from app.bot.cogs.admin.staff import is_allowed_staff
 from app.domain.models.EntityIDModel import QuestID
 from app.domain.models.QuestModel import PlayerStatus, QuestStatus
 
-from .sessions import (
+from .adapters import (
     QuestAnnounceView,
     QuestCreationSession,
     QuestUpdateSession,
 )
 
 if TYPE_CHECKING:
-    from app.bot.cogs.QuestCommandsCog import QuestCommandsCog
+    from app.bot.cogs.quests.cog import QuestCommandsCog
 
 
 async def quest_create(cog: "QuestCommandsCog", interaction: discord.Interaction) -> None:

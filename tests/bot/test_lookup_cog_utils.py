@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.bot.cogs.LookupCommandsCog import _build_lookup_embed
+from app.bot.cogs.lookup.cog import _build_lookup_embed
 from app.domain.models.LookupModel import LookupEntry
 
 

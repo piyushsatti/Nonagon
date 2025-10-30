@@ -26,11 +26,7 @@ def _normalize_role_ids(raw_ids: Optional[Iterable[object]]) -> set[int]:
 
 
 def is_allowed_staff(bot: commands.Bot, member: discord.Member) -> bool:
-    """Return True if the member should be treated as Nonagon staff.
-
-    A member is considered staff if they have standard moderation permissions
-    or if they possess any of the roles saved in the setup settings (legacy `/guild setup`).
-    """
+    """Return True if the member should be treated as Nonagon staff."""
     if not isinstance(member, discord.Member):
         return False
 
@@ -47,3 +43,6 @@ def is_allowed_staff(bot: commands.Bot, member: discord.Member) -> bool:
             return True
 
     return False
+
+
+__all__ = ["is_allowed_staff"]

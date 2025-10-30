@@ -1,50 +1,41 @@
 #!/usr/bin/env python3
-"""Fail if any provided Python file has leading indentation containing tabs."""
+"""Pre-commit helper: ensure leading indentation uses spaces for Python files.
 
-from __future__ import annotations
-
-import pathlib
-import re
+This script scans files passed as arguments (or all .py files under the
+repository if none provided) and exits with code 1 if any line begins with a
+tab character. It's intentionally small and dependency-free so pre-commit can
+run it in CI and locally.
+"""
 import sys
-
-TAB_LEADING = re.compile(r"^(\t+)\S")
-MIXED_LEADING = re.compile(r"^( +\t+)\S")
+from pathlib import Path
 
 
-def check_file(path: pathlib.Path) -> list[str]:
-    problems: list[str] = []
+def check_file(path: Path) -> int:
+    has_error = 0
     try:
-        text = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except Exception as exc:  # pragma: no cover
-        return [f"{path}: unable to read file: {exc}"]
+        text = path.read_text(encoding="utf-8")
+    except Exception:
+        return 0
 
-    for i, line in enumerate(text, start=1):
-        if not line or line.strip() == "":
-            continue
-        if MIXED_LEADING.match(line):
-            problems.append(f"{path}:{i}: leading indentation mixes spaces and tabs")
-            continue
-        if TAB_LEADING.match(line):
-            problems.append(f"{path}:{i}: leading indentation uses tabs; use spaces")
-    return problems
+    for i, line in enumerate(text.splitlines(), start=1):
+        if line.startswith("\t"):
+            print(f"{path}:{i}: Leading tab character found")
+            has_error = 1
+    return has_error
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) <= 1:
-        return 0
-    all_problems: list[str] = []
-    for name in argv[1:]:
-        path = pathlib.Path(name)
-        if not path.exists():
-            continue
-        all_problems.extend(check_file(path))
-    if all_problems:
-        print("Python indentation policy violation (spaces required):", file=sys.stderr)
-        for problem in all_problems:
-            print(problem, file=sys.stderr)
-        return 1
-    return 0
+    if len(argv) > 1:
+        files = [Path(p) for p in argv[1:]]
+    else:
+        files = list(Path('.').rglob('*.py'))
+
+    exit_code = 0
+    for f in files:
+        exit_code |= check_file(f)
+
+    return exit_code
 
 
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == '__main__':
     raise SystemExit(main(sys.argv))

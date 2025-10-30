@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional
 from urllib.parse import urlparse
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -16,9 +17,9 @@ from app.bot.character import (
     build_character_embed_from_model,
     status_label,
 )
+from app.bot.cogs.admin.staff import is_allowed_staff
+from app.bot.cogs.character.service import CharacterService
 from app.bot.services import guild_settings_store
-from app.bot.utils.logging import get_logger
-from app.bot.cogs._staff_utils import is_allowed_staff
 from app.bot.ui.wizards import (
     ContextAwareModal,
     PreviewWizardContext,
@@ -28,12 +29,10 @@ from app.bot.ui.wizards import (
     validate_http_url,
     validate_length,
 )
+from app.bot.utils.logging import get_logger
 from app.domain.models.CharacterModel import Character, CharacterRole
 from app.domain.models.EntityIDModel import CharacterID, UserID
 from app.domain.models.UserModel import User
-from app.infra.mongo.guild_adapter import upsert_character_sync
-from app.bot.config import BOT_FLUSH_VIA_ADAPTER
-from app.infra.serialization import from_bson, to_bson
 
 
 logger = get_logger(__name__)
@@ -46,45 +45,25 @@ class CharacterCommandsCog(commands.Cog):
         name="character", description="Manage Nonagon character profiles."
     )
 
-    def __init__(self, bot: commands.Bot):
+    def __init__(
+        self,
+        bot: commands.Bot,
+        *,
+        service: Optional[CharacterService] = None,
+    ):
         self.bot = bot
+        settings = getattr(bot, "settings", None)
+        flush_via_adapter = bool(getattr(settings, "flush_via_adapter", False))
+        self.service = service or CharacterService(
+            bot,
+            flush_via_adapter=flush_via_adapter,
+        )
         self._active_dm_sessions: set[int] = set()
 
     async def _fetch_character(
         self, guild: discord.Guild, raw_character_id: str
     ) -> Optional[Character]:
-        await self._ensure_guild_cache(guild)
-        guild_entry = self.bot.guild_data[guild.id]
-        db = guild_entry["db"]
-        try:
-            normalized = str(CharacterID.parse(raw_character_id))
-        except Exception:
-            normalized = raw_character_id.strip().upper()
-
-        doc = db["characters"].find_one(
-            {"guild_id": guild.id, "character_id": normalized}
-        )
-        if doc is None:
-            doc = db["characters"].find_one(
-                {"guild_id": guild.id, "character_id.value": normalized}
-            )
-        if doc is None:
-            return None
-
-        character = from_bson(Character, doc)
-        character.guild_id = guild.id
-        if isinstance(character.tags, list):
-            character.tags = [str(tag) for tag in character.tags]
-        else:
-            character.tags = []
-        if not isinstance(character.owner_id, UserID):
-            try:
-                character.owner_id = UserID.parse(str(character.owner_id))
-            except Exception:
-                pass
-        if not character.status:
-            character.status = CharacterRole.ACTIVE
-        return character
+        return await self.service.fetch_character(guild, raw_character_id)
 
     def _can_manage_character(
         self, member: discord.Member, character: Character
@@ -165,26 +144,7 @@ class CharacterCommandsCog(commands.Cog):
     async def _owned_character_docs(
         self, guild: discord.Guild, member: discord.Member
     ) -> List[dict]:
-        await self._ensure_guild_cache(guild)
-        guild_entry = self.bot.guild_data[guild.id]
-        db = guild_entry["db"]
-        owner_id = str(UserID.from_body(str(member.id)))
-        cursor = db["characters"].find(
-            {
-                "guild_id": guild.id,
-                "owner_id.value": owner_id,
-            },
-            {
-                "_id": 0,
-                "character_id": 1,
-                "name": 1,
-                "ddb_link": 1,
-                "status": 1,
-                "announcement_channel_id": 1,
-                "announcement_message_id": 1,
-            },
-        )
-        return list(cursor)
+        return await self.service.owned_character_docs(guild, member)
 
     @staticmethod
     def _normalize_character_id(raw: object) -> str:
@@ -306,19 +266,15 @@ class CharacterCommandsCog(commands.Cog):
             base = f"[Retired] {base}"
         return base[:90]
 
-    async def _ensure_guild_cache(self, guild: discord.Guild) -> None:
-        if guild.id not in self.bot.guild_data:
-            await self.bot.load_or_create_guild_cache(guild)
-
     async def _get_cached_user(self, member: discord.Member) -> User:
-        await self._ensure_guild_cache(member.guild)
+        await self.service.ensure_guild_cache(member.guild)
         guild_entry = self.bot.guild_data[member.guild.id]
 
         user = guild_entry["users"].get(member.id)
         if user is not None:
             return user
 
-        listener: Optional[commands.Cog] = self.bot.get_cog("ListnerCog")
+        listener: Optional[commands.Cog] = self.bot.get_cog("GuildListenersCog")
         if listener is None:
             raise RuntimeError("Listener cog not loaded; cannot resolve users.")
 
@@ -329,34 +285,14 @@ class CharacterCommandsCog(commands.Cog):
         user = await ensure_method(member)  # type: ignore[misc]
         return user
 
-    def _next_character_id(self, guild_id: int) -> CharacterID:
-        guild_entry = self.bot.guild_data[guild_id]
-        db = guild_entry["db"]
-        coll = db["characters"]
-        while True:
-            candidate = CharacterID.generate()
-            exists = coll.count_documents(
-                {"guild_id": guild_id, "character_id": str(candidate)}, limit=1
-            )
-            if not exists:
-                return candidate
+    async def _ensure_guild_cache(self, guild: discord.Guild) -> None:
+        await self.service.ensure_guild_cache(guild)
+
+    async def _next_character_id(self, guild: discord.Guild) -> CharacterID:
+        return await self.service.next_character_id(guild)
 
     def _persist_character(self, guild_id: int, character: Character) -> None:
-        if BOT_FLUSH_VIA_ADAPTER:
-            from app.bot.database import db_client
-            upsert_character_sync(db_client, guild_id, character)
-            return
-        guild_entry = self.bot.guild_data[guild_id]
-        db = guild_entry["db"]
-        character.guild_id = guild_id
-        doc = to_bson(character)
-        doc["guild_id"] = guild_id
-        doc["character_id"] = str(character.character_id)
-        db["characters"].update_one(
-            {"guild_id": guild_id, "character_id": str(character.character_id)},
-            {"$set": doc},
-            upsert=True,
-        )
+        self.service.persist_character(guild_id, character)
 
     @character.command(
         name="create",
@@ -1407,7 +1343,7 @@ class CharacterTagsModal(
         if not user.is_player:
             user.enable_player()
 
-        char_id = self.cog._next_character_id(self.guild.id)
+        char_id = await self.cog._next_character_id(self.guild)
         description = self._normalize_optional(self.draft.description)
         notes = self._normalize_optional(self.draft.notes)
         tags = list(self.draft.tags)

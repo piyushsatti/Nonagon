@@ -12,7 +12,7 @@ from app.domain.models.QuestModel import PlayerSignUp, PlayerStatus, Quest
 from app.bot.utils.logging import get_logger
 
 if TYPE_CHECKING:
-    from app.bot.cogs.QuestCommandsCog import QuestCommandsCog
+    from app.bot.cogs.quests.cog import QuestCommandsCog
 
 NO_PENDING_REQUESTS_LABEL = "No pending requests"
 

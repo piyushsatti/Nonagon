@@ -16,7 +16,7 @@ from app.domain.models.EntityIDModel import CharacterID
 from .utils import build_character_embed, build_character_embed_from_model
 
 if TYPE_CHECKING:
-    from app.bot.cogs.CharacterCommandsCog import CharacterCommandsCog
+    from app.bot.cogs.character.cog import CharacterCommandsCog
 
 
 class SessionCancelled(Exception):
@@ -370,7 +370,7 @@ class CharacterCreationSession(CharacterSessionBase):
         if not user.is_player:
             user.enable_player()
 
-        char_id = self.cog._next_character_id(self.guild.id)
+        char_id = await self.cog._next_character_id(self.guild)
         description = self._normalize_optional(self.data.get("description"))
         notes = self._normalize_optional(self.data.get("notes"))
         character = Character(

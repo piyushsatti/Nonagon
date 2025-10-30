@@ -8,7 +8,7 @@ import pytest
 import pytest_asyncio
 from discord.ext import commands
 
-from app.bot.cogs.QuestCommandsCog import QuestCommandsCog
+from app.bot.cogs.quests.cog import QuestCommandsCog
 from app.domain.models.EntityIDModel import QuestID, UserID
 from app.domain.models.QuestModel import Quest
 

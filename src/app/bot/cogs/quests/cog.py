@@ -14,14 +14,6 @@ from discord import app_commands
 from discord.abc import Messageable
 from discord.ext import commands
 
-from app.bot.config import (
-    BOT_FLUSH_VIA_ADAPTER,
-    QUEST_API_BASE_URL,
-    QUEST_BOARD_CHANNEL_ID,
-)
-from app.bot.quest import build_nudge_embed, build_quest_embed
-from app.bot.quest import commands as quest_commands
-from app.bot.quest.views import QuestSignupView
 from app.bot.ui.wizards import (
     ContextAwareModal,
     PreviewWizardContext,
@@ -32,13 +24,16 @@ from app.bot.ui.wizards import (
 )
 from app.bot.services import guild_settings_store
 from app.bot.utils.logging import get_logger
-from app.bot.cogs._staff_utils import is_allowed_staff
 from app.domain.models.EntityIDModel import CharacterID, EntityID, QuestID, UserID
 from app.domain.models.QuestModel import PlayerSignUp, PlayerStatus, Quest, QuestStatus
 from app.domain.models.UserModel import User
 from app.infra.mongo.guild_adapter import upsert_quest_sync
 from app.infra.mongo.users_repo import UsersRepoMongo
 from app.infra.serialization import to_bson
+
+from . import service as quest_service
+from .embeds import build_nudge_embed, build_quest_embed
+from .views import QuestSignupView
 
 
 logger = get_logger(__name__)
@@ -51,12 +46,31 @@ class QuestCommandsCog(commands.Cog):
         name="quest", description="Manage Nonagon quests."
     )
 
-    def __init__(self, bot: commands.Bot):
+    def __init__(
+        self,
+        bot: commands.Bot,
+        *,
+        users_repo: Optional[UsersRepoMongo] = None,
+    ):
         self.bot = bot
+        self.settings = getattr(bot, "settings", None)
         self._demo_log = logger.audit
-        self._users_repo = UsersRepoMongo()
+        self._users_repo = users_repo or UsersRepoMongo()
         self._active_quest_sessions: set[int] = set()
         self._quest_scheduler_task: Optional[asyncio.Task[None]] = None
+
+    def _board_channel_id(self) -> Optional[int]:
+        if self.settings is None:
+            return None
+        return getattr(self.settings, "quest_board_channel_id", None)
+
+    def _api_base_url(self) -> str:
+        if self.settings is None:
+            return ""
+        return getattr(self.settings, "quest_api_base_url", "") or ""
+
+    def _quest_api_base(self) -> str:
+        return self._api_base_url().rstrip("/")
 
     async def cog_load(self) -> None:
         if self._quest_scheduler_task is None:
@@ -98,11 +112,12 @@ class QuestCommandsCog(commands.Cog):
     async def _resolve_board_channel(
         self, guild: discord.Guild, fallback: discord.TextChannel
     ) -> Messageable:
-        if QUEST_BOARD_CHANNEL_ID:
-            channel = guild.get_channel(QUEST_BOARD_CHANNEL_ID)
+        board_channel_id = self._board_channel_id()
+        if board_channel_id:
+            channel = guild.get_channel(board_channel_id)
             if channel is None:
                 try:
-                    channel = await guild.fetch_channel(QUEST_BOARD_CHANNEL_ID)
+                    channel = await guild.fetch_channel(board_channel_id)
                 except Exception:
                     channel = None
             if channel is not None:
@@ -316,7 +331,7 @@ class QuestCommandsCog(commands.Cog):
         if user is not None:
             return user
 
-        listener: Optional[commands.Cog] = self.bot.get_cog("ListnerCog")
+        listener: Optional[commands.Cog] = self.bot.get_cog("GuildListenersCog")
         if listener is None:
             raise RuntimeError("Listener cog not loaded; cannot resolve users.")
 
@@ -421,7 +436,8 @@ class QuestCommandsCog(commands.Cog):
         return doc
 
     def _persist_quest(self, guild_id: int, quest: Quest) -> None:
-        if BOT_FLUSH_VIA_ADAPTER:
+        flush_via_adapter = getattr(self.settings, "flush_via_adapter", False)
+        if flush_via_adapter:
             from app.bot.database import db_client
 
             upsert_quest_sync(db_client, guild_id, quest)
@@ -437,10 +453,9 @@ class QuestCommandsCog(commands.Cog):
         )
 
     async def _persist_quest_via_api(self, guild: discord.Guild, quest: Quest) -> bool:
-        if not QUEST_API_BASE_URL:
+        base_url = self._quest_api_base()
+        if not base_url:
             return False
-
-        base_url = QUEST_API_BASE_URL.rstrip("/")
         url = f"{base_url}/v1/guilds/{guild.id}/quests"
         payload: dict[str, object] = {
             "quest_id": str(quest.quest_id),
@@ -490,10 +505,9 @@ class QuestCommandsCog(commands.Cog):
         user: User,
         character_id: CharacterID,
     ) -> bool:
-        if not QUEST_API_BASE_URL:
+        base_url = self._quest_api_base()
+        if not base_url:
             return False
-
-        base_url = QUEST_API_BASE_URL.rstrip("/")
         url = f"{base_url}/v1/guilds/{guild.id}/quests/{quest.quest_id}/signups"
         payload = {
             "user_id": str(user.user_id),
@@ -541,10 +555,9 @@ class QuestCommandsCog(commands.Cog):
         quest: Quest,
         user_id: UserID,
     ) -> bool:
-        if not QUEST_API_BASE_URL:
+        base_url = self._quest_api_base()
+        if not base_url:
             return False
-
-        base_url = QUEST_API_BASE_URL.rstrip("/")
         url = f"{base_url}/v1/guilds/{guild.id}/quests/{quest.quest_id}/signups/{user_id}:select"
 
         timeout = aiohttp.ClientTimeout(total=10)
@@ -585,10 +598,9 @@ class QuestCommandsCog(commands.Cog):
         quest: Quest,
         user_id: UserID,
     ) -> bool:
-        if not QUEST_API_BASE_URL:
+        base_url = self._quest_api_base()
+        if not base_url:
             return False
-
-        base_url = QUEST_API_BASE_URL.rstrip("/")
         url = f"{base_url}/v1/guilds/{guild.id}/quests/{quest.quest_id}/signups/{user_id}"
 
         timeout = aiohttp.ClientTimeout(total=10)
@@ -629,10 +641,9 @@ class QuestCommandsCog(commands.Cog):
         quest: Quest,
         referee: User,
     ) -> tuple[bool, Optional[datetime]]:
-        if not QUEST_API_BASE_URL:
+        base_url = self._quest_api_base()
+        if not base_url:
             return False, None
-
-        base_url = QUEST_API_BASE_URL.rstrip("/")
         url = f"{base_url}/v1/guilds/{guild.id}/quests/{quest.quest_id}:nudge"
         payload = {"referee_id": str(referee.user_id)}
 
@@ -705,10 +716,9 @@ class QuestCommandsCog(commands.Cog):
         guild: discord.Guild,
         quest: Quest,
     ) -> bool:
-        if not QUEST_API_BASE_URL:
+        base_url = self._quest_api_base()
+        if not base_url:
             return False
-
-        base_url = QUEST_API_BASE_URL.rstrip("/")
         url = f"{base_url}/v1/guilds/{guild.id}/quests/{quest.quest_id}:closeSignups"
 
         timeout = aiohttp.ClientTimeout(total=10)
@@ -1435,89 +1445,7 @@ class QuestCommandsCog(commands.Cog):
     @quest.command(name="create", description="Start a DM wizard to draft a quest.")
     @app_commands.guild_only()
     async def quest_create(self, interaction: discord.Interaction) -> None:
-        if interaction.guild is None:
-            await interaction.response.send_message(
-                "This command can only be used inside a guild.", ephemeral=True
-            )
-            return
-
-        member = interaction.user
-        if not isinstance(member, discord.Member):
-            await interaction.response.send_message(
-                "Only guild members can manage quests.", ephemeral=True
-            )
-            return
-
-        try:
-            user = await self._get_cached_user(member)
-        except RuntimeError as exc:
-            await interaction.response.send_message(str(exc), ephemeral=True)
-            return
-
-        if not user.is_referee and not is_allowed_staff(self.bot, member):
-            await interaction.response.send_message(
-                "You need the REFEREE role or an allowed staff role to create quests.",
-                ephemeral=True,
-            )
-            return
-
-        if member.id in self._active_quest_sessions:
-            await interaction.response.send_message(
-                "You already have an active quest session. Complete or cancel it before starting a new one.",
-                ephemeral=True,
-            )
-            return
-
-        await interaction.response.defer(ephemeral=True)
-        self._active_quest_sessions.add(member.id)
-        try:
-            dm_channel = await self._ensure_dm_channel(interaction, member)
-            if dm_channel is None:
-                return
-
-            session = QuestCreationSession(
-                self, interaction.guild, member, user, dm_channel
-            )
-            quest = await self._run_quest_creation_session(session, interaction)
-            if quest is None:
-                return
-
-            self._persist_quest(interaction.guild.id, quest)
-            dm_message = (
-                f"Quest `{quest.quest_id}` is saved as a draft.\n"
-                f"Run `/quest announce` in the server with Quest ID `{quest.quest_id}` when you're ready to publish, "
-                "or `/quest edit` to make further changes."
-            )
-            dm_sent = await self._send_creation_summary(session, quest, dm_message)
-
-            reply = (
-                f"Quest `{quest.quest_id}` drafted. "
-                "Use `/quest announce` when you're ready to publish it."
-            )
-            if dm_sent:
-                reply += " I sent you a DM with the preview and next steps."
-            else:
-                reply += " I couldn't DM you the preview—check your privacy settings."
-
-            post_view = QuestAnnounceView(
-                self,
-                session,
-                interaction.guild,
-                member,
-                quest,
-            )
-            await session._update_preview(
-                quest,
-                header=(
-                    "**Quest Draft Saved**\n"
-                    "Announce immediately or schedule an announcement using the buttons below."
-                ),
-                view=post_view,
-            )
-
-            await interaction.followup.send(reply, ephemeral=True)
-        finally:
-            self._active_quest_sessions.discard(member.id)
+        await quest_service.quest_create(self, interaction)
 
     @quest.command(name="announce", description="Announce a quest now or at a scheduled time.")
     @app_commands.describe(
@@ -1531,7 +1459,7 @@ class QuestCommandsCog(commands.Cog):
         quest: str,
         time: Optional[str] = None,
     ) -> None:
-        await quest_commands.quest_announce(self, interaction, quest, time)
+        await quest_service.quest_announce(self, interaction, quest, time)
 
     @quest.command(name="nudge", description="Re-announce a quest to bring attention back to it.")
     @app_commands.describe(quest="Quest ID (e.g. QUESA1B2C3)")
@@ -1539,7 +1467,7 @@ class QuestCommandsCog(commands.Cog):
     async def quest_nudge(
         self, interaction: discord.Interaction, quest: str
     ) -> None:
-        await quest_commands.quest_nudge(self, interaction, quest)
+        await quest_service.quest_nudge(self, interaction, quest)
 
     @quest.command(name="cancel", description="Cancel a quest and remove its signup interface.")
     @app_commands.describe(quest="Quest ID (e.g. QUESA1B2C3)")
@@ -1547,7 +1475,7 @@ class QuestCommandsCog(commands.Cog):
     async def quest_cancel(
         self, interaction: discord.Interaction, quest: str
     ) -> None:
-        await quest_commands.quest_cancel(self, interaction, quest)
+        await quest_service.quest_cancel(self, interaction, quest)
 
     @quest.command(name="players", description="List players and characters who played in a quest.")
     @app_commands.describe(quest="Quest ID (e.g. QUESA1B2C3)")
@@ -1555,13 +1483,13 @@ class QuestCommandsCog(commands.Cog):
     async def quest_players(
         self, interaction: discord.Interaction, quest: str
     ) -> None:
-        await quest_commands.quest_players(self, interaction, quest)
+        await quest_service.quest_players(self, interaction, quest)
 
     @quest.command(name="edit", description="Update a drafted or announced quest via DM.")
     @app_commands.describe(quest="Quest ID (e.g. QUESA1B2C3)")
     @app_commands.guild_only()
     async def quest_edit(self, interaction: discord.Interaction, quest: str) -> None:
-        await quest_commands.quest_edit(self, interaction, quest)
+        await quest_service.quest_edit(self, interaction, quest)
 
     @app_commands.command(
         name="joinquest",

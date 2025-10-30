@@ -10,13 +10,12 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from app.bot.cogs.summary.service import SummaryService
 from app.bot.services import guild_settings_store
 from app.bot.utils.logging import get_logger
 from app.domain.models.EntityIDModel import CharacterID, QuestID, SummaryID, UserID
 from app.domain.models.SummaryModel import QuestSummary, SummaryKind, SummaryStatus
 from app.domain.models.UserModel import User
-from app.infra.mongo.users_repo import UsersRepoMongo
-from app.infra.serialization import to_bson
 
 
 logger = get_logger(__name__)
@@ -29,34 +28,24 @@ class SummaryCommandsCog(commands.Cog):
         name="summary", description="Share quest summaries and open discussion threads."
     )
 
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(
+        self,
+        bot: commands.Bot,
+        *,
+        service: Optional[SummaryService] = None,
+    ) -> None:
         self.bot = bot
-        self._users_repo = UsersRepoMongo()
+        self.service = service or SummaryService(bot)
         self._active_summary_sessions: Set[int] = set()
         self._demo_log = logger.audit
 
     # ---------- Core helpers ----------
 
     async def _ensure_guild_cache(self, guild: discord.Guild) -> None:
-        if guild.id not in self.bot.guild_data:
-            await self.bot.load_or_create_guild_cache(guild)
+        await self.service.ensure_guild_cache(guild)
 
     def _lookup_user_display(self, guild_id: int, user_id: Optional[UserID]) -> str:
-        if user_id is None:
-            return "Unknown"
-        guild_entry = self.bot.guild_data.get(guild_id)
-        if not guild_entry:
-            return str(user_id)
-        users = guild_entry.get("users", {})
-        for cached in users.values():
-            try:
-                if cached.user_id == user_id:
-                    if cached.discord_id:
-                        return f"<@{cached.discord_id}>"
-                    return str(cached.user_id)
-            except AttributeError:
-                continue
-        return str(user_id)
+        return self.service.lookup_user_display(guild_id, user_id)
 
     async def _get_cached_user(self, member: discord.Member) -> User:
         await self._ensure_guild_cache(member.guild)
@@ -66,7 +55,7 @@ class SummaryCommandsCog(commands.Cog):
         if user is not None:
             return user
 
-        listener: Optional[commands.Cog] = self.bot.get_cog("ListnerCog")
+        listener: Optional[commands.Cog] = self.bot.get_cog("GuildListenersCog")
         if listener is None:
             raise RuntimeError("Listener cog not loaded; cannot resolve users.")
 
@@ -78,126 +67,22 @@ class SummaryCommandsCog(commands.Cog):
         return user
 
     def _summary_to_doc(self, summary: QuestSummary) -> dict:
-        payload = to_bson(summary)
-        payload["summary_id"] = {"value": str(summary.summary_id)}
-        payload["guild_id"] = int(summary.guild_id)
-        return payload
+        return self.service.summary_to_doc(summary)
 
     def _parse_entity_id(self, cls, payload: object) -> Optional[object]:
-        if payload is None:
-            return None
-        if isinstance(payload, cls):
-            return payload
-        if isinstance(payload, dict):
-            value = payload.get("value")
-            if isinstance(value, str) and value:
-                return cls.parse(value)
-            number = payload.get("number")
-            if number is not None:
-                prefix = payload.get("prefix", cls.prefix)
-                return cls.parse(f"{prefix}{number}")
-        if isinstance(payload, str) and payload:
-            return cls.parse(payload)
-        if isinstance(payload, int):
-            return cls.parse(f"{cls.prefix}{payload}")
-        return None
+        return self.service.parse_entity_id(cls, payload)
 
     def _summary_from_doc(self, guild_id: int, doc: dict) -> QuestSummary:
-        summary_id = self._parse_entity_id(SummaryID, doc.get("summary_id")) or SummaryID.parse(
-            str(doc.get("_id"))
-        )
-        kind_payload = doc.get("kind") or SummaryKind.PLAYER
-        try:
-            kind = kind_payload if isinstance(kind_payload, SummaryKind) else SummaryKind(kind_payload)
-        except ValueError:
-            kind = SummaryKind.PLAYER
-
-        summary = QuestSummary(
-            summary_id=summary_id,
-            kind=kind,
-            author_id=self._parse_entity_id(UserID, doc.get("author_id")),
-            character_id=self._parse_entity_id(CharacterID, doc.get("character_id")),
-            quest_id=self._parse_entity_id(QuestID, doc.get("quest_id")),
-            guild_id=int(doc.get("guild_id", guild_id)),
-            raw=doc.get("raw"),
-            title=doc.get("title"),
-            description=doc.get("description"),
-            created_on=doc.get("created_on") or datetime.now(timezone.utc),
-        )
-
-        summary.last_edited_at = doc.get("last_edited_at")
-        summary.players = [
-            self._parse_entity_id(UserID, entry)
-            for entry in doc.get("players", [])
-            if self._parse_entity_id(UserID, entry) is not None
-        ]
-        summary.characters = [
-            self._parse_entity_id(CharacterID, entry)
-            for entry in doc.get("characters", [])
-            if self._parse_entity_id(CharacterID, entry) is not None
-        ]
-        summary.linked_quests = [
-            self._parse_entity_id(QuestID, entry)
-            for entry in doc.get("linked_quests", [])
-            if self._parse_entity_id(QuestID, entry) is not None
-        ]
-        summary.linked_summaries = [
-            self._parse_entity_id(SummaryID, entry)
-            for entry in doc.get("linked_summaries", [])
-            if self._parse_entity_id(SummaryID, entry) is not None
-        ]
-
-        summary.channel_id = doc.get("channel_id")
-        summary.message_id = doc.get("message_id")
-        summary.thread_id = doc.get("thread_id")
-
-        status_raw = doc.get("status")
-        if status_raw:
-            try:
-                summary.status = status_raw if isinstance(status_raw, SummaryStatus) else SummaryStatus(status_raw)
-            except ValueError:
-                summary.status = SummaryStatus.POSTED
-
-        return summary
+        return self.service.summary_from_doc(guild_id, doc)
 
     def _persist_summary(self, guild_id: int, summary: QuestSummary) -> None:
-        summary.guild_id = guild_id
-        guild_entry = self.bot.guild_data[guild_id]
-        db = guild_entry["db"]
-        payload = self._summary_to_doc(summary)
-        db["summaries"].update_one(
-            {"guild_id": guild_id, "summary_id.value": str(summary.summary_id)},
-            {"$set": payload},
-            upsert=True,
-        )
+        self.service.persist_summary(guild_id, summary)
 
     def _fetch_summary(self, guild_id: int, summary_id: SummaryID) -> Optional[QuestSummary]:
-        guild_entry = self.bot.guild_data[guild_id]
-        db = guild_entry["db"]
-        doc = db["summaries"].find_one(
-            {
-                "guild_id": guild_id,
-                "$or": [
-                    {"summary_id.value": str(summary_id)},
-                    {"_id": str(summary_id)},
-                ],
-            }
-        )
-        if not doc:
-            return None
-        return self._summary_from_doc(guild_id, doc)
+        return self.service.fetch_summary(guild_id, summary_id)
 
-    def _next_summary_id(self, guild_id: int) -> SummaryID:
-        guild_entry = self.bot.guild_data[guild_id]
-        db = guild_entry["db"]
-        coll = db["summaries"]
-        while True:
-            candidate = SummaryID.generate()
-            exists = coll.count_documents(
-                {"guild_id": guild_id, "summary_id.value": str(candidate)}, limit=1
-            )
-            if not exists:
-                return candidate
+    async def _next_summary_id(self, guild: discord.Guild) -> SummaryID:
+        return await self.service.next_summary_id(guild)
 
     def _build_summary_embed(
         self,
@@ -736,7 +621,7 @@ class SummarySessionBase:
 
 class SummaryCreationSession(SummarySessionBase):
     async def run(self) -> SummaryCreationResult:
-        summary_id = self.cog._next_summary_id(self.guild.id)
+        summary_id = await self.cog._next_summary_id(self.guild)
         summary = QuestSummary(
             summary_id=summary_id,
             guild_id=self.guild.id,

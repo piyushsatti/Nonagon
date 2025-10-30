@@ -26,7 +26,7 @@
 - Try a simple flow to touch DB + logic:
   - Create something minimal (e.g., `/quest_create` with valid inputs).
   - Verify via `/quest_list` that it persists.
-- Listener sanity (optional): send a normal message in a channel the bot can access and watch logs for ListnerCog events.
+- Listener sanity (optional): send a normal message in a channel the bot can access and watch logs for GuildListenersCog events.
 
 ## Fast Dev Loop
 - Compose mounts your code: `./src:/app/src:ro`.

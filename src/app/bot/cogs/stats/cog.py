@@ -39,7 +39,7 @@ class StatsCommandsCog(commands.Cog):
         if user is not None:
             return user
 
-        listener: Optional[commands.Cog] = self.bot.get_cog("ListnerCog")
+        listener: Optional[commands.Cog] = self.bot.get_cog("GuildListenersCog")
         if listener is None:
             raise RuntimeError("Listener cog not loaded; cannot resolve users.")
 

@@ -11,10 +11,10 @@ import discord
 from app.domain.models.QuestModel import Quest, QuestStatus
 from app.domain.models.UserModel import User
 
-from .embeds import build_quest_embed
+from app.bot.cogs.quests.embeds import build_quest_embed
 
 if TYPE_CHECKING:
-    from app.bot.cogs.QuestCommandsCog import QuestCommandsCog
+    from app.bot.cogs.quests.cog import QuestCommandsCog
 
 
 class QuestConfirmView(discord.ui.View):

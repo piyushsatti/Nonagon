@@ -13,7 +13,7 @@ from discord.ext import commands
 from app.domain.models.LookupModel import LookupEntry
 from app.domain.models.UserModel import User
 from app.infra.mongo.lookup_repo import LookupRepoMongo
-from app.bot.cogs._staff_utils import is_allowed_staff
+from app.bot.cogs.admin.staff import is_allowed_staff
 from app.bot.utils.logging import get_logger
 
 
@@ -25,9 +25,14 @@ class LookupCommandsCog(commands.Cog):
 
     lookup = app_commands.Group(name="lookup", description="Manage lookup references")
 
-    def __init__(self, bot: commands.Bot):
+    def __init__(
+        self,
+        bot: commands.Bot,
+        *,
+        repo: Optional[LookupRepoMongo] = None,
+    ):
         self.bot = bot
-        self.repo = LookupRepoMongo()
+        self.repo = repo or LookupRepoMongo()
         self._sync_task: Optional[asyncio.Task[None]] = None
 
     async def cog_load(self) -> None:
@@ -85,7 +90,7 @@ class LookupCommandsCog(commands.Cog):
         if user is not None:
             return user
 
-        listener: Optional[commands.Cog] = self.bot.get_cog("ListnerCog")
+        listener: Optional[commands.Cog] = self.bot.get_cog("GuildListenersCog")
         if listener is None:
             raise RuntimeError("Listener cog not loaded; cannot resolve users.")
 

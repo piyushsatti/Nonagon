@@ -1,75 +1,35 @@
-from app.bot.utils.logging import get_logger
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from typing import Optional
 
 from discord import Guild, Member, Message, RawReactionActionEvent, VoiceState
 from discord.ext import commands
 
-from ..database import db_client
-from ...domain.models.UserModel import User
-from ..services.user_registry import UserRegistry
+from app.bot.cogs.listeners.member_cache import MemberCache
+from app.bot.utils.logging import get_logger
+from app.bot.database import db_client
+from app.domain.models.UserModel import User
 
 
 logger = get_logger(__name__)
 
-class ListnerCog(commands.Cog):
+
+class GuildListenersCog(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._voice_sessions: dict[int, datetime] = {}
-        self._user_registry = UserRegistry()
+        self._member_cache = MemberCache(bot)
         self._clock = lambda: datetime.now(timezone.utc)
 
     async def _ensure_cached_user(self, member: Member) -> User:
-        guild_id = member.guild.id
-        guild_entry = self.bot.guild_data.get(guild_id)
-
-        if guild_entry is None:
-            await self.bot.load_or_create_guild_cache(member.guild)
-            guild_entry = self.bot.guild_data[guild_id]
-
-        users = guild_entry.setdefault("users", {})
-        user = users.get(member.id)
-
-        if user is None:
-            user = await self._user_registry.ensure_member(member, guild_id)
-            user.guild_id = guild_id
-            users[member.id] = user
-
-        return user
+        return await self._member_cache.ensure_cached_user(member)
 
     async def _resolve_cached_user(
         self, guild: Guild, user_id: int
     ) -> Optional[User]:
-        guild_entry = self.bot.guild_data.get(guild.id)
-
-        if guild_entry is None:
-            await self.bot.load_or_create_guild_cache(guild)
-            guild_entry = self.bot.guild_data[guild.id]
-
-        users = guild_entry.setdefault("users", {})
-        user = users.get(user_id)
-
-        if user is not None:
-            return user
-
-        member = guild.get_member(user_id)
-        if member is None:
-            try:
-                member = await guild.fetch_member(user_id)
-            except Exception as exc:  # pragma: no cover - network edge
-                logger.warning(
-                    "Unable to resolve guild member %s in %s: %s",
-                    user_id,
-                    guild.id,
-                    exc,
-                )
-                return None
-
-        user = await self._user_registry.ensure_member(member, guild.id)
-        user.guild_id = guild.id
-        users[user_id] = user
-        return user
+        return await self._member_cache.resolve_cached_user(guild, user_id)
 
     async def _resolve_message_author_id(
         self, guild: Guild, channel_id: int, message_id: int
@@ -107,16 +67,8 @@ class ListnerCog(commands.Cog):
         if member.bot:
             return
 
-        user = await self._user_registry.ensure_member(member, member.guild.id)
-        user.guild_id = member.guild.id
-        ensure_entry = getattr(self.bot, "_ensure_guild_entry", None)
-        if callable(ensure_entry):
-            guild_entry = ensure_entry(member.guild.id)
-        else:
-            guild_entry = self.bot.guild_data.setdefault(
-                member.guild.id,
-                {"db": db_client.get_database(str(member.guild.id)), "users": {}},
-            )
+        user = await self._member_cache.ensure_cached_user(member)
+        guild_entry = await self._member_cache.ensure_guild_entry(member.guild)
         guild_entry.setdefault("users", {})[member.id] = user
         await self.bot.dirty_data.put((member.guild.id, member.id))
         logger.info(
@@ -318,5 +270,6 @@ class ListnerCog(commands.Cog):
         logger.error("Error in %s: %s %s", event_method, args, kwargs)
         await super().on_error(event_method, *args, **kwargs)
 
+
 async def setup(bot: commands.Bot):
-    await bot.add_cog(ListnerCog(bot))
+    await bot.add_cog(GuildListenersCog(bot))
